@@ -59,10 +59,31 @@ body {
 
 /* Topic Tree Styles */
 .topic-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
     padding: 0.5rem;
     cursor: pointer;
     border-radius: 0.25rem;
     transition: background-color 0.2s;
+}
+
+.topic-indent {
+    display: inline-block;
+    flex-shrink: 0;
+}
+
+.topic-spacer {
+    display: inline-block;
+    width: 16px;
+    flex-shrink: 0;
+}
+
+.topic-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .topic-item:hover {
@@ -107,6 +128,24 @@ body {
     font-weight: 600;
     min-width: 3rem;
     text-align: right;
+    margin-left: 0.75rem;
+    flex-shrink: 0;
+}
+
+.topic-nogeo-count {
+    font-weight: 600;
+    color: #f59e0b;
+    background-color: rgba(245, 158, 11, 0.15);
+    padding: 0.125rem 0.4rem;
+    border-radius: 0.25rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background-color 0.15s;
+}
+
+.topic-nogeo-count:hover {
+    background-color: rgba(245, 158, 11, 0.35);
 }
 
 .topic-color-indicator {
@@ -145,8 +184,38 @@ body {
 }
 
 /* Modal Styles */
-#config-modal.active {
+#config-modal,
+#nogeo-modal {
+    z-index: 9999;
+}
+
+#config-modal.active,
+#nogeo-modal.active {
     display: flex;
+}
+
+/* Stats Panel Resize Handle */
+#stats-panel-resize-handle {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 5px;
+    height: 100%;
+    cursor: ew-resize;
+    background-color: transparent;
+    z-index: 1000;
+    transition: background-color 0.15s;
+}
+
+#stats-panel-resize-handle:hover,
+#stats-panel-resize-handle.dragging {
+    background-color: #3b82f6;
+}
+
+body.resizing-stats-panel,
+body.resizing-stats-panel * {
+    cursor: ew-resize !important;
+    user-select: none !important;
 }
 
 /* Scrollbar Styles */

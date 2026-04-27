@@ -8,9 +8,26 @@ class StatsPanel {
         this.container = document.getElementById(containerId);
         this.topicTree = {};
         this.topicCounts = {};
+        this.noGeoCounts = {};
+        this.recentNoGeo = [];
+        this.maxRecentNoGeo = 500;
         this.filterCallbacks = [];
         this.activeFilters = new Set();
         this.expandedTopics = new Set();
+        this.setupNoGeoModal();
+    }
+
+    setupNoGeoModal() {
+        const modal = document.getElementById('nogeo-modal');
+        const closeBtn = document.getElementById('close-nogeo-btn');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => modal.classList.remove('active'));
+        }
+        if (modal) {
+            modal.addEventListener('click', (e) => {
+                if (e.target.id === 'nogeo-modal') modal.classList.remove('active');
+            });
+        }
     }
 
     /**
@@ -19,20 +36,41 @@ class StatsPanel {
      * @param {object} parsedMessage - Parsed message
      */
     updateTopic(topic, parsedMessage) {
+        const isNoGeo = !parsedMessage.hasGeometry;
+
         // Increment count
-        if (!this.topicCounts[topic]) {
-            this.topicCounts[topic] = 0;
-        }
+        if (!this.topicCounts[topic]) this.topicCounts[topic] = 0;
         this.topicCounts[topic]++;
+        if (isNoGeo) {
+            if (!this.noGeoCounts[topic]) this.noGeoCounts[topic] = 0;
+            this.noGeoCounts[topic]++;
+        }
 
         // Update parent topics counts
         const parts = topic.split('/');
         for (let i = 1; i < parts.length; i++) {
             const parentTopic = parts.slice(0, i).join('/');
-            if (!this.topicCounts[parentTopic]) {
-                this.topicCounts[parentTopic] = 0;
-            }
+            if (!this.topicCounts[parentTopic]) this.topicCounts[parentTopic] = 0;
             this.topicCounts[parentTopic]++;
+            if (isNoGeo) {
+                if (!this.noGeoCounts[parentTopic]) this.noGeoCounts[parentTopic] = 0;
+                this.noGeoCounts[parentTopic]++;
+            }
+        }
+
+        // Keep a capped buffer of recent no-geometry messages so they're explorable
+        if (isNoGeo) {
+            this.recentNoGeo.unshift({
+                topic: topic,
+                pubtime: parsedMessage.pubtime,
+                dataId: parsedMessage.dataId,
+                metadataId: parsedMessage.metadataId,
+                links: parsedMessage.links || [],
+                receivedAt: Date.now()
+            });
+            if (this.recentNoGeo.length > this.maxRecentNoGeo) {
+                this.recentNoGeo.length = this.maxRecentNoGeo;
+            }
         }
 
         // Build tree structure if needed
@@ -96,23 +134,23 @@ class StatsPanel {
         Object.keys(level).sort().forEach(key => {
             const node = level[key];
             const count = this.topicCounts[node.fullPath] || 0;
+            const noGeoCount = this.noGeoCounts[node.fullPath] || 0;
             const hasChildren = Object.keys(node.children).length > 0;
             const isExpanded = this.expandedTopics.has(node.fullPath);
             const isFiltered = this.activeFilters.has(node.category);
+            const fullPathAttr = this.escapeHtml(node.fullPath);
 
             html += '<div class="topic-item-container">';
-            html += `<div class="topic-item ${isFiltered ? 'filtered' : ''}" data-topic="${node.fullPath}" data-category="${node.category || ''}">`;
+            html += `<div class="topic-item ${isFiltered ? 'filtered' : ''}" data-topic="${fullPathAttr}" data-category="${this.escapeHtml(node.category || '')}">`;
 
             // Indentation
-            html += '<span style="display: inline-block; width: ' + (depth * 1) + 'rem;"></span>';
+            html += `<span class="topic-indent" style="width: ${depth}rem;"></span>`;
 
             // Expand/collapse icon
             if (hasChildren) {
-                html += `<span class="topic-expand ${isExpanded ? 'expanded' : ''}" data-action="toggle">`;
-                html += '▸';
-                html += '</span>';
+                html += `<span class="topic-expand ${isExpanded ? 'expanded' : ''}" data-action="toggle">▸</span>`;
             } else {
-                html += '<span style="display: inline-block; width: 16px;"></span>';
+                html += '<span class="topic-spacer"></span>';
             }
 
             // Color indicator for top-level topics
@@ -121,10 +159,15 @@ class StatsPanel {
             }
 
             // Topic name
-            html += `<span class="flex-1 topic-name">${node.name}</span>`;
+            html += `<span class="topic-name">${this.escapeHtml(node.name)}</span>`;
 
             // Count
             html += `<span class="topic-count">${count.toLocaleString()}</span>`;
+
+            // No-geometry badge — click to explore those messages
+            if (noGeoCount > 0) {
+                html += `<span class="topic-nogeo-count" data-action="show-nogeo" data-topic="${fullPathAttr}" title="${noGeoCount} messages without geometry — click to view">⚠ ${noGeoCount.toLocaleString()}</span>`;
+            }
 
             html += '</div>';
 
@@ -139,6 +182,54 @@ class StatsPanel {
         });
 
         return html;
+    }
+
+    escapeHtml(str) {
+        if (str == null) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    showNoGeoMessages(topicPrefix) {
+        const modal = document.getElementById('nogeo-modal');
+        const list = document.getElementById('nogeo-list');
+        const topicLabel = document.getElementById('nogeo-topic-filter');
+        const countLabel = document.getElementById('nogeo-count-label');
+        if (!modal || !list) return;
+
+        if (topicLabel) topicLabel.textContent = topicPrefix;
+
+        const matching = this.recentNoGeo.filter(m =>
+            m.topic === topicPrefix || m.topic.startsWith(topicPrefix + '/')
+        );
+        const totalForTopic = this.noGeoCounts[topicPrefix] || 0;
+        if (countLabel) {
+            countLabel.textContent = `Showing ${matching.length.toLocaleString()} of ${totalForTopic.toLocaleString()} (buffer keeps the most recent ${this.maxRecentNoGeo})`;
+        }
+
+        if (matching.length === 0) {
+            list.innerHTML = '<div class="text-gray-400 text-sm">No recent messages buffered for this topic.</div>';
+        } else {
+            list.innerHTML = matching.slice(0, 100).map(m => {
+                const linksHtml = (m.links || []).map(l =>
+                    `<a href="${this.escapeHtml(l.href)}" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline break-all block text-xs">${this.escapeHtml(l.rel || 'link')}: ${this.escapeHtml(l.href)}</a>`
+                ).join('');
+                return `
+                    <div class="bg-gray-700 rounded p-3 text-sm">
+                        <div class="text-xs text-gray-400 break-all mb-1">${this.escapeHtml(m.topic)}</div>
+                        <div class="mb-1"><span class="text-gray-400">pubtime:</span> ${this.escapeHtml(m.pubtime || '—')}</div>
+                        ${m.dataId ? `<div class="break-all mb-1"><span class="text-gray-400">data_id:</span> ${this.escapeHtml(m.dataId)}</div>` : ''}
+                        ${linksHtml ? `<div class="mt-2 space-y-1">${linksHtml}</div>` : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        modal.classList.add('active');
     }
 
     /**
@@ -158,6 +249,10 @@ class StatsPanel {
                     // Toggle expand/collapse
                     e.stopPropagation();
                     this.toggleExpand(topic);
+                } else if (action === 'show-nogeo') {
+                    // Open the no-geometry message viewer for this topic prefix
+                    e.stopPropagation();
+                    this.showNoGeoMessages(e.target.dataset.topic);
                 } else if (category) {
                     // Toggle filter for top-level categories
                     this.toggleFilter(category);
@@ -231,6 +326,8 @@ class StatsPanel {
     clear() {
         this.topicTree = {};
         this.topicCounts = {};
+        this.noGeoCounts = {};
+        this.recentNoGeo = [];
         this.render();
     }
 

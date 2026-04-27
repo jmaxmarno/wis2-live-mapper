@@ -23,12 +23,8 @@ class MessageParser {
             // Parse JSON if string
             const message = typeof payload === 'string' ? JSON.parse(payload) : payload;
 
-            // Extract geometry
+            // Extract geometry (may be null — message is still kept for stats)
             const geometry = this.extractGeometry(message);
-            if (!geometry) {
-                console.warn('No valid geometry found in message:', message);
-                return null;
-            }
 
             // Determine topic category
             const category = this.getTopicCategory(topic);
@@ -41,6 +37,7 @@ class MessageParser {
                 category: category,
                 color: color,
                 geometry: geometry,
+                hasGeometry: !!geometry,
                 properties: message.properties || {},
                 pubtime: message.properties?.pubtime || new Date().toISOString(),
                 dataId: message.properties?.data_id,

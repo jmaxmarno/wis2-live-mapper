@@ -97,7 +97,12 @@ class MQTTClient {
 
             this.client.on('reconnect', () => {
                 console.log('Attempting to reconnect...');
-                this.emitStatus('connecting', 'Reconnecting...');
+                // Only flip the UI to "Reconnecting..." if we know the link is actually down.
+                // A 'reconnect' that fires while we're still happily connected (transient
+                // library bookkeeping) shouldn't override a working state.
+                if (!this.connected) {
+                    this.emitStatus('connecting', 'Reconnecting...');
+                }
             });
 
             this.client.on('offline', () => {

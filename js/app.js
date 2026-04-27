@@ -56,6 +56,9 @@ class WIS2LiveMapper {
         // Set up UI event handlers
         this.setupUIHandlers();
 
+        // Make the stats panel draggable to resize
+        this.setupResizableStatsPanel();
+
         // Populate configuration UI
         this.populateConfigUI(config);
 
@@ -172,7 +175,20 @@ class WIS2LiveMapper {
         const protocolOptions = document.getElementById('protocol-options');
         protocolOptions.innerHTML = '';
 
-        broker.connections.forEach((conn, index) => {
+        // Browsers can't speak raw-TCP MQTTS — only WS/WSS work in-browser.
+        const supported = broker.connections.filter(c => c.protocol === 'ws' || c.protocol === 'wss');
+        const unsupported = broker.connections.filter(c => c.protocol !== 'ws' && c.protocol !== 'wss');
+
+        if (supported.length === 0) {
+            const note = document.createElement('div');
+            note.className = 'text-sm text-yellow-400';
+            note.textContent = 'This broker does not advertise a WebSocket endpoint, so it cannot be reached from a browser.';
+            protocolOptions.appendChild(note);
+            return;
+        }
+
+        let firstChecked = false;
+        supported.forEach((conn) => {
             const div = document.createElement('div');
             div.className = 'flex items-center gap-2';
 
@@ -181,8 +197,9 @@ class WIS2LiveMapper {
             radio.name = 'protocol';
             radio.id = `protocol-${conn.protocol}`;
             radio.value = conn.protocol;
-            if (index === 0 || conn.protocol === this.configManager.config.defaultProtocol) {
+            if (!firstChecked || conn.protocol === this.configManager.config.defaultProtocol) {
                 radio.checked = true;
+                firstChecked = true;
             }
 
             const label = document.createElement('label');
@@ -194,6 +211,73 @@ class WIS2LiveMapper {
             div.appendChild(label);
             protocolOptions.appendChild(div);
         });
+
+        if (unsupported.length > 0) {
+            const note = document.createElement('div');
+            note.className = 'text-xs text-gray-400 mt-2';
+            note.textContent = `Hidden: ${unsupported.map(c => c.protocol.toUpperCase()).join(', ')} — browsers can only open WebSocket connections.`;
+            protocolOptions.appendChild(note);
+        }
+    }
+
+    /**
+     * Wire up the drag handle that resizes the stats panel.
+     */
+    setupResizableStatsPanel() {
+        const aside = document.getElementById('stats-panel');
+        const handle = document.getElementById('stats-panel-resize-handle');
+        if (!aside || !handle) return;
+
+        const MIN_WIDTH = 200;
+        const MAX_WIDTH = 800;
+
+        // Restore previously saved width
+        try {
+            const saved = parseInt(localStorage.getItem('wis2-mapper-stats-width'), 10);
+            if (!isNaN(saved) && saved >= MIN_WIDTH && saved <= MAX_WIDTH) {
+                aside.style.width = saved + 'px';
+            }
+        } catch (e) {}
+
+        let isDragging = false;
+        let pendingFrame = null;
+
+        const onMouseMove = (e) => {
+            if (!isDragging) return;
+            const rect = aside.getBoundingClientRect();
+            const newWidth = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, e.clientX - rect.left));
+            aside.style.width = newWidth + 'px';
+            if (!pendingFrame) {
+                pendingFrame = requestAnimationFrame(() => {
+                    pendingFrame = null;
+                    if (this.mapViewer && this.mapViewer.map) {
+                        this.mapViewer.map.invalidateSize();
+                    }
+                });
+            }
+        };
+
+        const onMouseUp = () => {
+            if (!isDragging) return;
+            isDragging = false;
+            handle.classList.remove('dragging');
+            document.body.classList.remove('resizing-stats-panel');
+            try {
+                localStorage.setItem('wis2-mapper-stats-width', parseInt(aside.style.width, 10));
+            } catch (e) {}
+            if (this.mapViewer && this.mapViewer.map) {
+                this.mapViewer.map.invalidateSize();
+            }
+        };
+
+        handle.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            handle.classList.add('dragging');
+            document.body.classList.add('resizing-stats-panel');
+            e.preventDefault();
+        });
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
     }
 
     /**
@@ -293,15 +377,23 @@ class WIS2LiveMapper {
             return;
         }
 
+        // Self-correct the status display: if data is flowing, the connection is up.
+        // (Works around UI flicker when MQTT.js fires reconnect/connect rapidly.)
+        if (this.lastShownStatus !== 'connected' && this.currentBroker) {
+            this.updateConnectionStatus('connected', `Connected to ${this.currentBroker.name}`);
+        }
+
         // Increment message count
         this.messageCount++;
         this.messageTimestamps.push(Date.now());
 
-        // Update statistics panel
+        // Update statistics panel (counts include messages without geometry)
         this.statsPanel.updateTopic(topic, parsedMessage);
 
-        // Add to map
-        this.mapViewer.addMessage(parsedMessage);
+        // Add to map only when geometry is present
+        if (parsedMessage.hasGeometry) {
+            this.mapViewer.addMessage(parsedMessage);
+        }
 
         // Update UI
         this.updateMessageCounters();
@@ -319,6 +411,7 @@ class WIS2LiveMapper {
 
         statusIndicator.className = 'status-indicator ' + status;
         statusText.textContent = message;
+        this.lastShownStatus = status;
 
         // Update connection info in modal
         if (status === 'connected') {
@@ -375,10 +468,18 @@ class WIS2LiveMapper {
      * Clear map
      */
     clearMap() {
-        if (confirm('Clear all markers from the map?')) {
-            this.mapViewer.clearAllMarkers();
-            this.updateMapInfo();
-        }
+        if (!confirm('Clear all markers, message counters, and topic statistics?')) return;
+
+        this.mapViewer.clearAllMarkers();
+        this.statsPanel.clear();
+
+        this.messageCount = 0;
+        this.messageTimestamps = [];
+        this.messageRate = 0;
+
+        this.updateMessageCounters();
+        this.updateMapInfo();
+        document.getElementById('messages-per-second').textContent = '0.0';
     }
 }
 
