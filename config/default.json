@@ -1,0 +1,100 @@
+{
+  "brokers": [
+    {
+      "id": "fr-meteofrance-global-broker",
+      "name": "Météo-France (France)",
+      "host": "globalbroker.meteo.fr",
+      "connections": [
+        {
+          "protocol": "wss",
+          "port": 443,
+          "url": "wss://globalbroker.meteo.fr:443"
+        },
+        {
+          "protocol": "mqtts",
+          "port": 8883,
+          "url": "mqtts://globalbroker.meteo.fr:8883"
+        }
+      ],
+      "username": "everyone",
+      "password": "everyone"
+    },
+    {
+      "id": "us-noaa-global-broker",
+      "name": "NOAA National Weather Service (United States)",
+      "host": "wis2broker.globaldata.nws.noaa.gov",
+      "connections": [
+        {
+          "protocol": "mqtts",
+          "port": 8883,
+          "url": "mqtts://wis2broker.globaldata.nws.noaa.gov:8883"
+        }
+      ],
+      "username": "everyone",
+      "password": "everyone"
+    },
+    {
+      "id": "br-inmet-global-broker",
+      "name": "Instituto Nacional de Meteorología (Brazil)",
+      "host": "globalbroker.inmet.gov.br",
+      "connections": [
+        {
+          "protocol": "wss",
+          "port": 443,
+          "url": "wss://globalbroker.inmet.gov.br:443"
+        },
+        {
+          "protocol": "mqtts",
+          "port": 8883,
+          "url": "mqtts://globalbroker.inmet.gov.br:8883"
+        }
+      ],
+      "username": "everyone",
+      "password": "everyone"
+    },
+    {
+      "id": "cn-cma-global-broker",
+      "name": "China Meteorological Administration",
+      "host": "gb.wis.cma.cn",
+      "connections": [
+        {
+          "protocol": "mqtts",
+          "port": 8883,
+          "url": "mqtts://gb.wis.cma.cn:8883"
+        }
+      ],
+      "username": "everyone",
+      "password": "everyone"
+    }
+  ],
+  "defaultBroker": "fr-meteofrance-global-broker",
+  "defaultProtocol": "wss",
+  "topics": [
+    {
+      "pattern": "origin/a/wis2/#",
+      "name": "Origin",
+      "color": "#3B82F6",
+      "enabled": true
+    },
+    {
+      "pattern": "cache/a/wis2/#",
+      "name": "Cache",
+      "color": "#10B981",
+      "enabled": true
+    },
+    {
+      "pattern": "monitor/a/wis2/#",
+      "name": "Monitor",
+      "color": "#F59E0B",
+      "enabled": true
+    }
+  ],
+  "settings": {
+    "maxMessages": 1000,
+    "markerFadeDuration": 30,
+    "defaultZoom": 2,
+    "defaultCenter": [0, 0],
+    "updateInterval": 100,
+    "markerSize": 8
+  }
+}
