@@ -1,6 +1,11 @@
 /**
  * Statistics Panel
- * Manages the topic hierarchy tree and message statistics
+ *
+ * View over a RecentMessages buffer. Counts at every topic-hierarchy
+ * level reflect what's currently buffered (decremented when messages
+ * FIFO-evict). Clicking a row expands/collapses; the ⋯ icon next to the
+ * count opens the message-list modal for that topic prefix; the ⚠ badge
+ * opens the same modal pre-filtered to no-geometry messages.
  */
 class StatsPanel {
     constructor(containerId, gdcs) {
@@ -10,203 +15,159 @@ class StatsPanel {
         this.topicTree = {};
         this.topicCounts = {};
         this.noGeoCounts = {};
-        this.recentNoGeo = [];
-        this.maxRecentNoGeo = 500;
-        this.filterCallbacks = [];
-        this.activeFilters = new Set();
         this.expandedTopics = new Set();
-        this.setupNoGeoModal();
+        this.browseHandler = null; // (topicPrefix, { noGeoOnly }) => void
     }
 
-    setupNoGeoModal() {
-        const modal = document.getElementById('nogeo-modal');
-        const closeBtn = document.getElementById('close-nogeo-btn');
-        if (closeBtn) {
-            closeBtn.addEventListener('click', () => modal.classList.remove('active'));
-        }
-        if (modal) {
-            modal.addEventListener('click', (e) => {
-                if (e.target.id === 'nogeo-modal') modal.classList.remove('active');
-            });
-        }
+    /** Wire to a RecentMessages instance — listen for buffer add/remove. */
+    bindBuffer(recentMessages) {
+        recentMessages.onAdd((msg) => this.onMessageAdded(msg));
+        recentMessages.onRemove((msg) => this.onMessageRemoved(msg));
     }
 
-    /**
-     * Update statistics for a topic
-     * @param {string} topic - Full topic path
-     * @param {object} parsedMessage - Parsed message
-     */
-    updateTopic(topic, parsedMessage) {
+    /** Provide the callback used by ⋯ and ⚠ clicks to open the list modal. */
+    onBrowseRequest(callback) {
+        this.browseHandler = callback;
+    }
+
+    onMessageAdded(parsedMessage) {
         const isNoGeo = !parsedMessage.hasGeometry;
+        const parts = parsedMessage.topic.split('/');
 
-        // Increment count
-        if (!this.topicCounts[topic]) this.topicCounts[topic] = 0;
-        this.topicCounts[topic]++;
-        if (isNoGeo) {
-            if (!this.noGeoCounts[topic]) this.noGeoCounts[topic] = 0;
-            this.noGeoCounts[topic]++;
+        // Cumulative counts at every prefix level
+        for (let i = 1; i <= parts.length; i++) {
+            const path = parts.slice(0, i).join('/');
+            this.topicCounts[path] = (this.topicCounts[path] || 0) + 1;
+            if (isNoGeo) this.noGeoCounts[path] = (this.noGeoCounts[path] || 0) + 1;
         }
 
-        // Update parent topics counts
-        const parts = topic.split('/');
-        for (let i = 1; i < parts.length; i++) {
-            const parentTopic = parts.slice(0, i).join('/');
-            if (!this.topicCounts[parentTopic]) this.topicCounts[parentTopic] = 0;
-            this.topicCounts[parentTopic]++;
-            if (isNoGeo) {
-                if (!this.noGeoCounts[parentTopic]) this.noGeoCounts[parentTopic] = 0;
-                this.noGeoCounts[parentTopic]++;
-            }
-        }
-
-        // Keep a capped buffer of recent no-geometry messages so they're explorable
-        if (isNoGeo) {
-            this.recentNoGeo.unshift({
-                topic: topic,
-                pubtime: parsedMessage.pubtime,
-                dataId: parsedMessage.dataId,
-                metadataId: parsedMessage.metadataId,
-                links: parsedMessage.links || [],
-                receivedAt: Date.now()
-            });
-            if (this.recentNoGeo.length > this.maxRecentNoGeo) {
-                this.recentNoGeo.length = this.maxRecentNoGeo;
-            }
-        }
-
-        // Build tree structure if needed
-        this.buildTopicTree(topic, parsedMessage);
-
-        // Debounced render
-        if (!this.renderTimeout) {
-            this.renderTimeout = setTimeout(() => {
-                this.render();
-                this.renderTimeout = null;
-            }, 100);
-        }
+        this.buildTopicTree(parsedMessage.topic, parsedMessage);
+        this._scheduleRender();
     }
 
-    /**
-     * Build topic tree structure
-     * @param {string} topic - Full topic path
-     * @param {object} parsedMessage - Parsed message
-     */
+    onMessageRemoved(parsedMessage) {
+        const isNoGeo = !parsedMessage.hasGeometry;
+        const parts = parsedMessage.topic.split('/');
+
+        for (let i = 1; i <= parts.length; i++) {
+            const path = parts.slice(0, i).join('/');
+            if (this.topicCounts[path]) this.topicCounts[path]--;
+            if (isNoGeo && this.noGeoCounts[path]) this.noGeoCounts[path]--;
+        }
+
+        // Rows are kept even at count 0 (Q5).
+        this._scheduleRender();
+    }
+
     buildTopicTree(topic, parsedMessage) {
         const parts = topic.split('/');
-        let currentLevel = this.topicTree;
-
-        parts.forEach((part, index) => {
-            if (!currentLevel[part]) {
-                const fullPath = parts.slice(0, index + 1).join('/');
-                currentLevel[part] = {
+        let level = this.topicTree;
+        parts.forEach((part, i) => {
+            if (!level[part]) {
+                const fullPath = parts.slice(0, i + 1).join('/');
+                level[part] = {
                     name: part,
-                    fullPath: fullPath,
+                    fullPath,
                     children: {},
-                    category: index === 0 ? part : null,
-                    color: index === 0 ? parsedMessage.color : null
+                    category: i === 0 ? part : null,
+                    color: i === 0 ? parsedMessage.color : null
                 };
             }
-            currentLevel = currentLevel[part].children;
+            level = level[part].children;
         });
     }
 
-    /**
-     * Render the topic tree
-     */
+    _scheduleRender() {
+        if (this.renderTimeout) return;
+        this.renderTimeout = setTimeout(() => {
+            this.render();
+            this.renderTimeout = null;
+        }, 100);
+    }
+
     render() {
         if (!this.container) return;
-
-        const html = this.renderTopicLevel(this.topicTree, 0);
-        this.container.innerHTML = html;
-
-        // Attach event listeners
+        this.container.innerHTML = this.renderTopicLevel(this.topicTree, 0);
         this.attachEventListeners();
     }
 
-    /**
-     * Render a level of the topic tree
-     * @param {object} level - Tree level object
-     * @param {number} depth - Current depth
-     * @returns {string} HTML string
-     */
     renderTopicLevel(level, depth) {
         let html = '';
-
         Object.keys(level).sort().forEach(key => {
             const node = level[key];
             const count = this.topicCounts[node.fullPath] || 0;
             const noGeoCount = this.noGeoCounts[node.fullPath] || 0;
             const hasChildren = Object.keys(node.children).length > 0;
             const isExpanded = this.expandedTopics.has(node.fullPath);
-            const isFiltered = this.activeFilters.has(node.category);
-            const fullPathAttr = this.escapeHtml(node.fullPath);
+            const path = this.escapeHtml(node.fullPath);
 
             html += '<div class="topic-item-container">';
-            html += `<div class="topic-item ${isFiltered ? 'filtered' : ''}" data-topic="${fullPathAttr}" data-category="${this.escapeHtml(node.category || '')}">`;
-
-            // Indentation
+            html += `<div class="topic-item" data-topic="${path}">`;
             html += `<span class="topic-indent" style="width: ${depth}rem;"></span>`;
-
-            // Expand/collapse icon
             if (hasChildren) {
-                html += `<span class="topic-expand ${isExpanded ? 'expanded' : ''}" data-action="toggle">▸</span>`;
+                html += `<span class="topic-expand ${isExpanded ? 'expanded' : ''}">▸</span>`;
             } else {
                 html += '<span class="topic-spacer"></span>';
             }
-
-            // Color indicator for top-level topics
             if (node.color) {
                 html += `<span class="topic-color-indicator" style="background-color: ${node.color};"></span>`;
             }
-
-            // Topic name
             html += `<span class="topic-name">${this.escapeHtml(node.name)}</span>`;
-
-            // Count
             html += `<span class="topic-count">${count.toLocaleString()}</span>`;
 
-            // No-geometry badge — click to explore those messages
-            if (noGeoCount > 0) {
-                html += `<span class="topic-nogeo-count" data-action="show-nogeo" data-topic="${fullPathAttr}" title="${noGeoCount} messages without geometry — click to view">⚠ ${noGeoCount.toLocaleString()}</span>`;
+            // Browse icon — opens list modal for "all messages with this prefix"
+            if (count > 0) {
+                html += `<span class="topic-browse-icon" data-action="browse-topic" data-topic="${path}" title="View buffered messages for this topic">⋯</span>`;
             }
-
+            // No-geo badge — opens same modal pre-filtered to no-geometry only
+            if (noGeoCount > 0) {
+                html += `<span class="topic-nogeo-count" data-action="browse-nogeo" data-topic="${path}" title="${noGeoCount} buffered messages without geometry — click to view">⚠ ${noGeoCount.toLocaleString()}</span>`;
+            }
             html += '</div>';
 
-            // Children (if expanded)
             if (hasChildren && isExpanded) {
                 html += '<div class="topic-children">';
                 html += this.renderTopicLevel(node.children, depth + 1);
                 html += '</div>';
             }
-
             html += '</div>';
         });
-
         return html;
     }
 
-    renderGdcLinksFor(noGeoItem) {
-        if (!this.gdcs || this.gdcs.length === 0) return '';
-        if (typeof GDCLinks === 'undefined') return '';
+    attachEventListeners() {
+        const items = this.container.querySelectorAll('.topic-item');
+        items.forEach(item => {
+            const topic = item.dataset.topic;
+            item.addEventListener('click', (e) => {
+                const action = e.target.dataset.action;
+                if (action === 'browse-topic') {
+                    e.stopPropagation();
+                    if (this.browseHandler) this.browseHandler(e.target.dataset.topic, { noGeoOnly: false });
+                    return;
+                }
+                if (action === 'browse-nogeo') {
+                    e.stopPropagation();
+                    if (this.browseHandler) this.browseHandler(e.target.dataset.topic, { noGeoOnly: true });
+                    return;
+                }
+                // Anywhere else on the row → expand/collapse
+                this.toggleExpand(topic);
+            });
+        });
+    }
 
-        // The buffered no-geo entry doesn't carry the topic in the shape buildAllLinks expects
-        // beyond what we stored — it has topic, metadataId. Adapt minimally.
-        const linkSet = GDCLinks.buildAllLinks(
-            { topic: noGeoItem.topic, metadataId: noGeoItem.metadataId },
-            this.gdcs
-        );
-        if (linkSet.links.length === 0) return '';
+    toggleExpand(topic) {
+        if (this.expandedTopics.has(topic)) this.expandedTopics.delete(topic);
+        else this.expandedTopics.add(topic);
+        this.render();
+    }
 
-        const escAttr = (s) => this.escapeHtml(s);
-        const buttons = linkSet.links.map(l =>
-            `<a class="gdc-link" href="${escAttr(l.url)}" target="_blank" rel="noopener noreferrer">${this.escapeHtml(l.name)} <span aria-hidden="true">↗</span></a>`
-        ).join('');
-
-        const label = linkSet.kind === 'record'
-            ? 'GDC record:'
-            : `GDC search (centre <code>${this.escapeHtml(linkSet.centre)}</code>):`;
-
-        return `<div class="payload-gdc-section mt-2"><div class="gdc-section-label">${label}</div><div class="gdc-link-list">${buttons}</div></div>`;
+    clear() {
+        this.topicTree = {};
+        this.topicCounts = {};
+        this.noGeoCounts = {};
+        this.render();
     }
 
     escapeHtml(str) {
@@ -217,157 +178,5 @@ class StatsPanel {
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#39;');
-    }
-
-    showNoGeoMessages(topicPrefix) {
-        const modal = document.getElementById('nogeo-modal');
-        const list = document.getElementById('nogeo-list');
-        const topicLabel = document.getElementById('nogeo-topic-filter');
-        const countLabel = document.getElementById('nogeo-count-label');
-        if (!modal || !list) return;
-
-        if (topicLabel) topicLabel.textContent = topicPrefix;
-
-        const matching = this.recentNoGeo.filter(m =>
-            m.topic === topicPrefix || m.topic.startsWith(topicPrefix + '/')
-        );
-        const totalForTopic = this.noGeoCounts[topicPrefix] || 0;
-        if (countLabel) {
-            countLabel.textContent = `Showing ${matching.length.toLocaleString()} of ${totalForTopic.toLocaleString()} (buffer keeps the most recent ${this.maxRecentNoGeo})`;
-        }
-
-        if (matching.length === 0) {
-            list.innerHTML = '<div class="text-muted text-sm">No recent messages buffered for this topic.</div>';
-        } else {
-            list.innerHTML = matching.slice(0, 100).map(m => {
-                const linksHtml = (m.links || []).map(l =>
-                    `<a href="${this.escapeHtml(l.href)}" target="_blank" rel="noopener noreferrer" class="nogeo-link">${this.escapeHtml(l.rel || 'link')}: ${this.escapeHtml(l.href)}</a>`
-                ).join('');
-                const gdcHtml = this.renderGdcLinksFor(m);
-                return `
-                    <div class="nogeo-item">
-                        <div class="text-xs text-muted break-all mb-1">${this.escapeHtml(m.topic)}</div>
-                        <div class="mb-1"><span class="text-muted">pubtime:</span> ${this.escapeHtml(m.pubtime || '—')}</div>
-                        ${m.dataId ? `<div class="break-all mb-1"><span class="text-muted">data_id:</span> ${this.escapeHtml(m.dataId)}</div>` : ''}
-                        ${linksHtml ? `<div class="mt-2 space-y-1">${linksHtml}</div>` : ''}
-                        ${gdcHtml}
-                    </div>
-                `;
-            }).join('');
-        }
-
-        modal.classList.add('active');
-    }
-
-    /**
-     * Attach event listeners to topic items
-     */
-    attachEventListeners() {
-        const topicItems = this.container.querySelectorAll('.topic-item');
-
-        topicItems.forEach(item => {
-            const topic = item.dataset.topic;
-            const category = item.dataset.category;
-
-            item.addEventListener('click', (e) => {
-                const action = e.target.dataset.action;
-
-                if (action === 'toggle') {
-                    // Toggle expand/collapse
-                    e.stopPropagation();
-                    this.toggleExpand(topic);
-                } else if (action === 'show-nogeo') {
-                    // Open the no-geometry message viewer for this topic prefix
-                    e.stopPropagation();
-                    this.showNoGeoMessages(e.target.dataset.topic);
-                } else if (category) {
-                    // Toggle filter for top-level categories
-                    this.toggleFilter(category);
-                }
-            });
-        });
-    }
-
-    /**
-     * Toggle expand/collapse for a topic
-     * @param {string} topic - Topic path
-     */
-    toggleExpand(topic) {
-        if (this.expandedTopics.has(topic)) {
-            this.expandedTopics.delete(topic);
-        } else {
-            this.expandedTopics.add(topic);
-        }
-        this.render();
-    }
-
-    /**
-     * Toggle filter for a category
-     * @param {string} category - Category name (origin, cache, monitor)
-     */
-    toggleFilter(category) {
-        if (!category) return;
-
-        if (this.activeFilters.has(category)) {
-            this.activeFilters.delete(category);
-        } else {
-            this.activeFilters.add(category);
-        }
-
-        // Notify callbacks
-        this.filterCallbacks.forEach(callback => {
-            try {
-                callback(this.activeFilters);
-            } catch (error) {
-                console.error('Error in filter callback:', error);
-            }
-        });
-
-        this.render();
-    }
-
-    /**
-     * Register a filter change callback
-     * @param {function} callback - Callback function
-     */
-    onFilterChange(callback) {
-        this.filterCallbacks.push(callback);
-    }
-
-    /**
-     * Get total message count
-     * @returns {number} Total count
-     */
-    getTotalCount() {
-        let total = 0;
-        Object.values(this.topicCounts).forEach(count => {
-            total += count;
-        });
-        // Divide by depth to avoid counting parent topics
-        return Math.max(...Object.values(this.topicCounts));
-    }
-
-    /**
-     * Clear all statistics
-     */
-    clear() {
-        this.topicTree = {};
-        this.topicCounts = {};
-        this.noGeoCounts = {};
-        this.recentNoGeo = [];
-        this.render();
-    }
-
-    /**
-     * Get counts by category
-     * @returns {object} Counts by category
-     */
-    getCategoryCounts() {
-        const counts = {
-            origin: this.topicCounts['origin'] || 0,
-            cache: this.topicCounts['cache'] || 0,
-            monitor: this.topicCounts['monitor'] || 0
-        };
-        return counts;
     }
 }

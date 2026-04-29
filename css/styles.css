@@ -149,13 +149,6 @@ body {
 
 .topic-item:hover { background-color: var(--wmo-blue-pale); }
 
-.topic-item.filtered {
-    background-color: var(--wmo-blue);
-    color: #ffffff;
-}
-.topic-item.filtered:hover { background-color: var(--wmo-blue-dark); }
-.topic-item.filtered .topic-count { color: rgba(255, 255, 255, 0.85); }
-
 .topic-indent { display: inline-block; flex-shrink: 0; }
 .topic-spacer { display: inline-block; width: 16px; flex-shrink: 0; }
 
@@ -205,6 +198,53 @@ body {
     transition: background-color 0.15s;
 }
 .topic-nogeo-count:hover { background-color: rgba(217, 119, 6, 0.25); }
+
+.topic-browse-icon {
+    color: var(--wmo-text-subtle);
+    cursor: pointer;
+    padding: 0 0.4rem;
+    border-radius: 0.25rem;
+    font-size: 1rem;
+    line-height: 1;
+    flex-shrink: 0;
+    transition: background-color 0.15s, color 0.15s;
+    user-select: none;
+}
+.topic-browse-icon:hover {
+    background-color: var(--wmo-blue-pale);
+    color: var(--wmo-blue);
+}
+
+/* Message list modal items */
+.message-list-item {
+    background-color: var(--wmo-surface-alt);
+    border: 1px solid var(--wmo-border);
+    border-radius: 0.375rem;
+    padding: 0.625rem 0.75rem;
+    font-size: 0.8125rem;
+}
+
+.msg-flag {
+    display: inline-block;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    padding: 0.0625rem 0.375rem;
+    border-radius: 0.25rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.msg-flag-geo {
+    color: var(--wmo-blue-dark);
+    background-color: var(--wmo-blue-pale);
+}
+.msg-flag-nogeo {
+    color: var(--wmo-warning);
+    background-color: rgba(217, 119, 6, 0.15);
+}
+
+.message-list-item .popup-details-btn {
+    margin-top: 0;
+}
 
 .topic-color-indicator {
     width: 12px;
@@ -270,6 +310,9 @@ body {
     z-index: 9999;
 }
 .modal.active { display: flex; }
+
+/* Payload modal sits above the message list modal so drill-in works cleanly */
+#payload-modal { z-index: 10000; }
 
 .modal-card {
     background-color: var(--wmo-surface);

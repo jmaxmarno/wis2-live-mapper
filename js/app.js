@@ -32,11 +32,25 @@ class WIS2LiveMapper {
         // Initialize components
         this.messageParser = new MessageParser();
         this.mqttClient = new MQTTClient();
+        this.recentMessages = new RecentMessages(config.settings.maxMessages);
         this.mapViewer = new MapViewer('map', config);
         this.statsPanel = new StatsPanel('topic-tree', config.gdcs || []);
 
         // Initialize map
         this.mapViewer.init();
+
+        // Map and stats panel are both views of the buffer
+        this.mapViewer.bindBuffer(this.recentMessages);
+        this.statsPanel.bindBuffer(this.recentMessages);
+
+        // After every add/remove, refresh the on-screen counters
+        this.recentMessages.onAdd(() => this.updateMapInfo());
+        this.recentMessages.onRemove(() => this.updateMapInfo());
+
+        // ⋯ and ⚠ in the topic tree open the message-list modal
+        this.statsPanel.onBrowseRequest((topicPrefix, opts) => {
+            this.showMessageList(topicPrefix, opts);
+        });
 
         // Set up MQTT event handlers
         this.mqttClient.onMessage((topic, payload) => {
@@ -47,12 +61,6 @@ class WIS2LiveMapper {
             this.updateConnectionStatus(status, message);
         });
 
-        // Set up stats panel filter handler
-        this.statsPanel.onFilterChange((filters) => {
-            this.mapViewer.setTopicFilter(filters);
-            this.updateMapInfo();
-        });
-
         // Set up UI event handlers
         this.setupUIHandlers();
 
@@ -61,6 +69,9 @@ class WIS2LiveMapper {
 
         // Wire the payload-detail modal (opens when a popup "View details" button is clicked)
         this.setupPayloadModal();
+
+        // Wire the message-list modal (opens via ⋯ / ⚠ in the topic tree)
+        this.setupMessageListModal();
 
         // Populate configuration UI
         this.populateConfigUI(config);
@@ -148,7 +159,7 @@ class WIS2LiveMapper {
             if (!btn) return;
             e.preventDefault();
             const id = btn.dataset.msgId;
-            const msg = this.mapViewer && this.mapViewer.messageMap.get(id);
+            const msg = this.recentMessages && this.recentMessages.get(id);
             if (msg) this.showPayloadModal(msg);
         });
     }
@@ -535,34 +546,22 @@ class WIS2LiveMapper {
      * @param {string} payload - Message payload
      */
     handleMessage(topic, payload) {
-        // Parse message
         const parsedMessage = this.messageParser.parse(topic, payload);
+        if (!parsedMessage) return;
 
-        if (!parsedMessage) {
-            return;
-        }
-
-        // Self-correct the status display: if data is flowing, the connection is up.
-        // (Works around UI flicker when MQTT.js fires reconnect/connect rapidly.)
+        // Self-correct status display: if data is flowing, we're connected.
         if (this.lastShownStatus !== 'connected' && this.currentBroker) {
             this.updateConnectionStatus('connected', `Connected to ${this.currentBroker.name}`);
         }
 
-        // Increment message count
+        // Lifetime counter (separate from buffer state shown in topic tree).
         this.messageCount++;
         this.messageTimestamps.push(Date.now());
 
-        // Update statistics panel (counts include messages without geometry)
-        this.statsPanel.updateTopic(topic, parsedMessage);
+        // Single source of truth — map and stats panel update via buffer events.
+        this.recentMessages.add(parsedMessage);
 
-        // Add to map only when geometry is present
-        if (parsedMessage.hasGeometry) {
-            this.mapViewer.addMessage(parsedMessage);
-        }
-
-        // Update UI
         this.updateMessageCounters();
-        this.updateMapInfo();
     }
 
     /**
@@ -603,9 +602,11 @@ class WIS2LiveMapper {
      * Update map info display
      */
     updateMapInfo() {
+        const buffered = this.recentMessages ? this.recentMessages.size() : 0;
+        const onMap = this.mapViewer ? this.mapViewer.getMarkerCount() : 0;
         document.getElementById('map-message-count').textContent = this.messageCount.toLocaleString();
-        document.getElementById('map-shown-count').textContent = this.mapViewer.getTotalMarkerCount().toLocaleString();
-        document.getElementById('visible-markers').textContent = this.mapViewer.getVisibleMarkerCount().toLocaleString();
+        document.getElementById('map-shown-count').textContent = onMap.toLocaleString();
+        document.getElementById('visible-markers').textContent = buffered.toLocaleString();
     }
 
     /**
@@ -635,7 +636,9 @@ class WIS2LiveMapper {
     clearMap() {
         if (!confirm('Clear all markers, message counters, and topic statistics?')) return;
 
-        this.mapViewer.clearAllMarkers();
+        // Clearing the buffer cascades remove events into the map and stats panel.
+        if (this.recentMessages) this.recentMessages.clear();
+        this.mapViewer.clearAllMarkers(); // belt-and-suspenders
         this.statsPanel.clear();
 
         this.messageCount = 0;
@@ -645,6 +648,73 @@ class WIS2LiveMapper {
         this.updateMessageCounters();
         this.updateMapInfo();
         document.getElementById('messages-per-second').textContent = '0.0';
+    }
+
+    /**
+     * Wire the message-list modal: close, click-outside, list rendering.
+     */
+    setupMessageListModal() {
+        const modal = document.getElementById('message-list-modal');
+        const closeBtn = document.getElementById('close-message-list-btn');
+        if (closeBtn) closeBtn.addEventListener('click', () => modal.classList.remove('active'));
+        if (modal) {
+            modal.addEventListener('click', (e) => {
+                if (e.target.id === 'message-list-modal') modal.classList.remove('active');
+            });
+        }
+    }
+
+    showMessageList(topicPrefix, opts = {}) {
+        const { noGeoOnly = false } = opts;
+        const modal = document.getElementById('message-list-modal');
+        const heading = document.getElementById('message-list-heading');
+        const topicEl = document.getElementById('message-list-topic');
+        const countEl = document.getElementById('message-list-count');
+        const listEl = document.getElementById('message-list');
+        if (!modal || !listEl) return;
+
+        const all = this.recentMessages.findByTopicPrefix(topicPrefix);
+        const matching = noGeoOnly ? all.filter(m => !m.hasGeometry) : all;
+
+        if (heading) heading.textContent = noGeoOnly ? 'Buffered messages without geometry' : 'Buffered messages';
+        if (topicEl) topicEl.textContent = topicPrefix;
+        if (countEl) {
+            countEl.textContent = `${matching.length.toLocaleString()} buffered (FIFO cap: ${this.recentMessages.maxSize.toLocaleString()})`;
+        }
+
+        if (matching.length === 0) {
+            listEl.innerHTML = '<div class="text-muted text-sm">No messages currently buffered for this topic.</div>';
+        } else {
+            const esc = (s) => this.escapeHtml(s);
+            listEl.innerHTML = matching.slice(0, 200).map(m => {
+                const flag = m.hasGeometry
+                    ? '<span class="msg-flag msg-flag-geo">geo</span>'
+                    : '<span class="msg-flag msg-flag-nogeo">no-geo</span>';
+                return `
+                    <div class="message-list-item">
+                        <div class="flex items-center gap-2 mb-1">
+                            ${flag}
+                            <span class="text-xs text-muted">${esc(new Date(m.pubtime || Date.now()).toLocaleTimeString())}</span>
+                        </div>
+                        <div class="text-xs text-muted break-all mb-1">${esc(m.topic)}</div>
+                        ${m.dataId ? `<div class="text-xs break-all mb-2"><span class="text-muted">data_id:</span> ${esc(m.dataId)}</div>` : ''}
+                        <button class="popup-details-btn" data-msg-id="${esc(m.id)}">View details &amp; GDC links</button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        modal.classList.add('active');
+    }
+
+    escapeHtml(str) {
+        if (str == null) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 }
 

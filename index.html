@@ -104,20 +104,20 @@
         </div>
     </div>
 
-    <!-- No-Geometry Messages Modal -->
-    <div id="nogeo-modal" class="modal hidden items-center justify-center">
+    <!-- Message List Modal (used for "browse topic" and "no-geo only") -->
+    <div id="message-list-modal" class="modal hidden items-center justify-center">
         <div class="modal-card max-w-2xl max-h-[80vh] flex flex-col">
             <div class="flex justify-between items-center mb-2">
-                <h2 class="text-xl font-bold modal-heading">Messages without geometry</h2>
-                <button id="close-nogeo-btn" class="modal-close" aria-label="Close">
+                <h2 id="message-list-heading" class="text-xl font-bold modal-heading">Messages</h2>
+                <button id="close-message-list-btn" class="modal-close" aria-label="Close">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                     </svg>
                 </button>
             </div>
-            <div class="text-xs text-muted mb-1">Topic: <span id="nogeo-topic-filter" class="font-mono"></span></div>
-            <div id="nogeo-count-label" class="text-xs text-muted mb-3"></div>
-            <div id="nogeo-list" class="overflow-y-auto flex-1 space-y-2 pr-1"></div>
+            <div class="text-xs text-muted mb-1">Topic: <span id="message-list-topic" class="font-mono"></span></div>
+            <div id="message-list-count" class="text-xs text-muted mb-3"></div>
+            <div id="message-list" class="overflow-y-auto flex-1 space-y-2 pr-1"></div>
         </div>
     </div>
 
@@ -201,6 +201,7 @@
     <script src="js/message-parser.js"></script>
     <script src="js/mqtt-client.js"></script>
     <script src="js/gdc-link.js"></script>
+    <script src="js/recent-messages.js"></script>
     <script src="js/map-viewer.js"></script>
     <script src="js/stats-panel.js"></script>
     <script src="js/app.js"></script>
