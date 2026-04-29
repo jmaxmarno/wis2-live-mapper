@@ -352,6 +352,22 @@ body {
     letter-spacing: -0.01em;
 }
 
+.about-content { line-height: 1.55; }
+.about-content p { margin-bottom: 0.75rem; }
+.about-content a {
+    color: var(--wmo-blue);
+    text-decoration: underline;
+}
+.about-content a:hover { color: var(--wmo-blue-dark); }
+
+.about-cat-list { list-style: none; padding: 0; margin: 0; }
+.about-cat-list li {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0.25rem 0;
+}
+
 .modal-close {
     color: var(--wmo-text-subtle);
     background: transparent;

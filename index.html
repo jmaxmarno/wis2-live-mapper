@@ -26,6 +26,9 @@
                     <span class="status-indicator disconnected"></span>
                     <span id="status-text">Disconnected</span>
                 </div>
+                <button id="about-btn" class="btn btn-on-header" aria-label="About this app">
+                    About
+                </button>
                 <button id="config-btn" class="btn btn-on-header">
                     Configure
                 </button>
@@ -80,6 +83,45 @@
                 </div>
             </div>
         </main>
+    </div>
+
+    <!-- About Modal -->
+    <div id="about-modal" class="modal hidden items-center justify-center">
+        <div class="modal-card max-w-xl">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold modal-heading">About WIS2 Live Mapper</h2>
+                <button id="close-about-btn" class="modal-close" aria-label="Close">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            <div class="about-content text-sm">
+                <p class="mb-3">
+                    A live, browser-only viewer of the
+                    <a href="https://community.wmo.int/en/activity-areas/wis" target="_blank" rel="noopener noreferrer">WMO Information System 2.0 (WIS2)</a>
+                    notification stream. The app connects to one of the WMO global brokers over MQTT-over-WebSocket and plots incoming messages on the map as they arrive.
+                </p>
+                <p class="mb-2 font-semibold">Three message categories:</p>
+                <ul class="about-cat-list mb-3">
+                    <li><span class="topic-color-indicator" style="background-color:#3B82F6"></span><span><strong>Origin</strong> — data published by the source centre</span></li>
+                    <li><span class="topic-color-indicator" style="background-color:#10B981"></span><span><strong>Cache</strong> — data mirrored by a global cache node</span></li>
+                    <li><span class="topic-color-indicator" style="background-color:#F59E0B"></span><span><strong>Monitor</strong> — broker heartbeats and processing alerts</span></li>
+                </ul>
+                <p class="mb-3">
+                    Click any marker — or a topic's <strong>⋯</strong> icon — to open the full message payload (raw JSON) along with deep links into the WIS2 Global Discovery Catalogues
+                    (Canada, Germany, China). The <strong>⚠</strong> badge on a topic surfaces buffered messages that arrived without geometry (typically monitor alerts).
+                </p>
+                <p class="mb-3">
+                    Markers fade to grey after the configured fade duration but stay on the map until the buffer's FIFO cap evicts them. The side-panel topic tree reflects what's currently buffered, so counts decrement as messages age out.
+                </p>
+                <p class="text-muted text-xs">
+                    References:
+                    <a href="https://wmo-im.github.io/wis2-cookbook/cookbook/latest/wis2-cookbook-STABLE.html" target="_blank" rel="noopener noreferrer">WIS2 Cookbook</a> ·
+                    <a href="https://github.com/wmo-im/wis2-notification-message" target="_blank" rel="noopener noreferrer">Notification Message Schema</a>
+                </p>
+            </div>
+        </div>
     </div>
 
     <!-- Payload Detail Modal -->

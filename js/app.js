@@ -248,6 +248,22 @@ class WIS2LiveMapper {
      * Set up UI event handlers
      */
     setupUIHandlers() {
+        // About button — toggles the info modal
+        const aboutBtn = document.getElementById('about-btn');
+        const aboutModal = document.getElementById('about-modal');
+        const closeAboutBtn = document.getElementById('close-about-btn');
+        if (aboutBtn && aboutModal) {
+            aboutBtn.addEventListener('click', () => aboutModal.classList.add('active'));
+        }
+        if (closeAboutBtn && aboutModal) {
+            closeAboutBtn.addEventListener('click', () => aboutModal.classList.remove('active'));
+        }
+        if (aboutModal) {
+            aboutModal.addEventListener('click', (e) => {
+                if (e.target.id === 'about-modal') aboutModal.classList.remove('active');
+            });
+        }
+
         // Config button
         document.getElementById('config-btn').addEventListener('click', () => {
             this.showConfigModal();
