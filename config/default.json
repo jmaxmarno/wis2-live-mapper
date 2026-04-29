@@ -89,6 +89,23 @@
       "enabled": true
     }
   ],
+  "gdcs": [
+    {
+      "id": "ca-eccc",
+      "name": "Canada (ECCC-MSC)",
+      "baseUrl": "https://wis2-gdc.weather.gc.ca"
+    },
+    {
+      "id": "de-dwd",
+      "name": "Germany (DWD)",
+      "baseUrl": "https://wis2.dwd.de/gdc"
+    },
+    {
+      "id": "cn-cma",
+      "name": "China (CMA)",
+      "baseUrl": "https://gdc.wis.cma.cn/api"
+    }
+  ],
   "settings": {
     "maxMessages": 1000,
     "markerFadeDuration": 30,

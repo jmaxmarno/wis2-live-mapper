@@ -33,7 +33,7 @@ class WIS2LiveMapper {
         this.messageParser = new MessageParser();
         this.mqttClient = new MQTTClient();
         this.mapViewer = new MapViewer('map', config);
-        this.statsPanel = new StatsPanel('topic-tree');
+        this.statsPanel = new StatsPanel('topic-tree', config.gdcs || []);
 
         // Initialize map
         this.mapViewer.init();
@@ -59,6 +59,9 @@ class WIS2LiveMapper {
         // Make the stats panel draggable to resize
         this.setupResizableStatsPanel();
 
+        // Wire the payload-detail modal (opens when a popup "View details" button is clicked)
+        this.setupPayloadModal();
+
         // Populate configuration UI
         this.populateConfigUI(config);
 
@@ -66,6 +69,168 @@ class WIS2LiveMapper {
         this.startMessageRateCalculation();
 
         console.log('WIS2 Live Mapper initialized');
+
+        // Auto-connect using default config so data starts flowing immediately
+        this.autoConnect();
+    }
+
+    /**
+     * Connect using the default config values without requiring user interaction.
+     * Falls back to the first browser-compatible protocol if the configured default
+     * is mqtts (browsers can only do ws/wss).
+     */
+    autoConnect() {
+        const config = this.configManager.config;
+        const broker = this.configManager.getBroker(config.defaultBroker);
+        if (!broker) {
+            console.warn('Auto-connect skipped: default broker not found in config');
+            return;
+        }
+
+        const wsConnections = broker.connections.filter(c => c.protocol === 'ws' || c.protocol === 'wss');
+        let protocol = config.defaultProtocol;
+        if (!wsConnections.find(c => c.protocol === protocol)) {
+            protocol = wsConnections[0]?.protocol;
+        }
+        if (!protocol) {
+            console.warn('Auto-connect skipped: default broker has no browser-compatible protocol');
+            return;
+        }
+
+        const topics = config.topics.filter(t => t.enabled);
+        if (topics.length === 0) {
+            console.warn('Auto-connect skipped: no topics enabled in default config');
+            return;
+        }
+
+        // Reflect chosen protocol in the modal radios so Configure stays in sync
+        const radio = document.getElementById(`protocol-${protocol}`);
+        if (radio) radio.checked = true;
+
+        this.currentBroker = broker;
+        this.currentProtocol = protocol;
+        this.mqttClient.connect(broker, protocol, topics);
+    }
+
+    /**
+     * Set up the payload-detail modal: clicks on popup details buttons,
+     * close, copy-to-clipboard, click-outside-to-close.
+     */
+    setupPayloadModal() {
+        const modal = document.getElementById('payload-modal');
+        const closeBtn = document.getElementById('close-payload-btn');
+        const copyBtn = document.getElementById('payload-copy-btn');
+
+        if (closeBtn) closeBtn.addEventListener('click', () => modal.classList.remove('active'));
+        if (modal) {
+            modal.addEventListener('click', (e) => {
+                if (e.target.id === 'payload-modal') modal.classList.remove('active');
+            });
+        }
+        if (copyBtn) {
+            copyBtn.addEventListener('click', async () => {
+                if (!this.currentPayload) return;
+                const text = JSON.stringify(this.currentPayload, null, 2);
+                try {
+                    await navigator.clipboard.writeText(text);
+                    const orig = copyBtn.textContent;
+                    copyBtn.textContent = 'Copied!';
+                    setTimeout(() => { copyBtn.textContent = orig; }, 1500);
+                } catch (err) {
+                    console.error('Copy failed:', err);
+                }
+            });
+        }
+
+        // Event delegation: open the modal when any popup-details button is clicked
+        document.addEventListener('click', (e) => {
+            const btn = e.target.closest('.popup-details-btn');
+            if (!btn) return;
+            e.preventDefault();
+            const id = btn.dataset.msgId;
+            const msg = this.mapViewer && this.mapViewer.messageMap.get(id);
+            if (msg) this.showPayloadModal(msg);
+        });
+    }
+
+    showPayloadModal(parsedMessage) {
+        const modal = document.getElementById('payload-modal');
+        const topicEl = document.getElementById('payload-topic');
+        const linksEl = document.getElementById('payload-gdc-links');
+        const jsonEl = document.getElementById('payload-json');
+        if (!modal || !jsonEl) return;
+
+        this.currentPayload = parsedMessage.raw || parsedMessage;
+
+        if (topicEl) topicEl.textContent = parsedMessage.topic || '';
+
+        // GDC links — one per configured GDC (record link if metadata_id present, else centre search)
+        const gdcs = (this.configManager && this.configManager.config && this.configManager.config.gdcs) || [];
+        const linkSet = (typeof GDCLinks !== 'undefined') ? GDCLinks.buildAllLinks(parsedMessage, gdcs) : { kind: 'none', links: [] };
+        linksEl.innerHTML = this.renderGdcLinks(linkSet);
+
+        // Pretty-printed, syntax-highlighted JSON
+        jsonEl.innerHTML = this.formatJsonHtml(this.currentPayload);
+
+        modal.classList.add('active');
+    }
+
+    renderGdcLinks(linkSet) {
+        const escAttr = (s) => String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const escText = (s) => String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+        if (!linkSet.links.length) {
+            return '<div class="gdc-section-empty">No GDC link available — message has no metadata_id and no parseable centre id.</div>';
+        }
+
+        let label;
+        if (linkSet.kind === 'record') {
+            label = 'Discovery-metadata record:';
+        } else {
+            label = `No metadata_id — search centre <code>${escText(linkSet.centre)}</code> on:`;
+        }
+
+        const buttons = linkSet.links.map(l =>
+            `<a class="gdc-link" href="${escAttr(l.url)}" target="_blank" rel="noopener noreferrer">${escText(l.name)} <span aria-hidden="true">↗</span></a>`
+        ).join('');
+
+        return `<div class="gdc-section-label">${label}</div><div class="gdc-link-list">${buttons}</div>`;
+    }
+
+    formatJsonHtml(obj) {
+        let json;
+        try {
+            json = JSON.stringify(obj, null, 2);
+        } catch (e) {
+            return '<span class="json-null">[unserializable payload]</span>';
+        }
+        if (json === undefined) json = 'undefined';
+
+        // HTML-escape first, then add syntax-color spans
+        const escaped = json
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+
+        return escaped.replace(
+            /("(?:\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(?:true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g,
+            (match) => {
+                let cls;
+                if (/^"/.test(match)) {
+                    cls = /:\s*$/.test(match) ? 'json-key' : 'json-string';
+                } else if (/^(true|false)$/.test(match)) {
+                    cls = 'json-boolean';
+                } else if (match === 'null') {
+                    cls = 'json-null';
+                } else {
+                    cls = 'json-number';
+                }
+                return `<span class="${cls}">${match}</span>`;
+            }
+        );
     }
 
     /**

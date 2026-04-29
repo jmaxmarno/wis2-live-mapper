@@ -9,6 +9,7 @@ class MapViewer {
         this.map = null;
         this.markers = [];
         this.markerMap = new Map(); // id -> marker
+        this.messageMap = new Map(); // id -> parsedMessage (for the payload modal)
         this.activeFilters = new Set();
         this.fadeDuration = config.settings.markerFadeDuration * 1000; // Convert to milliseconds
         this.maxMessages = config.settings.maxMessages;
@@ -25,28 +26,28 @@ class MapViewer {
             zoomControl: true
         });
 
-        // Define base layers
+        // Define base layers — Minimal (CARTO light) is default to match the WMO white/blue theme
         const baseLayers = {
-            "OpenTopoMap": L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-                maxZoom: 17,
-                attribution: 'Map data: © OpenStreetMap contributors, SRTM | Map style: © OpenTopoMap (CC-BY-SA)'
+            "Minimal": L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '© OpenStreetMap contributors, © CARTO'
             }),
             "OpenStreetMap": L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 maxZoom: 19,
                 attribution: '© OpenStreetMap contributors'
             }),
+            "OpenTopoMap": L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+                maxZoom: 17,
+                attribution: 'Map data: © OpenStreetMap contributors, SRTM | Map style: © OpenTopoMap (CC-BY-SA)'
+            }),
             "Satellite": L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
                 maxZoom: 19,
                 attribution: 'Tiles © Esri'
-            }),
-            "Minimal": L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png', {
-                maxZoom: 19,
-                attribution: '© OpenStreetMap contributors, © CARTO'
             })
         };
 
-        // Add default layer (OpenTopoMap)
-        baseLayers["OpenTopoMap"].addTo(this.map);
+        // Add default layer (Minimal)
+        baseLayers["Minimal"].addTo(this.map);
 
         // Add layer control
         L.control.layers(baseLayers).addTo(this.map);
@@ -83,7 +84,7 @@ class MapViewer {
             // Add to map
             marker.addTo(this.map);
 
-            // Store marker
+            // Store marker + the parsed message so the details modal can find it on click
             this.markers.push({
                 id: parsedMessage.id,
                 marker: marker,
@@ -91,6 +92,7 @@ class MapViewer {
                 timestamp: Date.now()
             });
             this.markerMap.set(parsedMessage.id, marker);
+            this.messageMap.set(parsedMessage.id, parsedMessage);
 
             // Start fade animation
             this.startFade(parsedMessage.id, marker);
@@ -188,33 +190,30 @@ class MapViewer {
      * @returns {string} HTML content
      */
     createPopupContent(parsedMessage) {
-        let html = '<div style="min-width: 200px;">';
+        const esc = (s) => String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+        let html = '<div style="min-width: 220px;">';
 
         html += `<div class="popup-field">`;
         html += `<div class="popup-label">Topic</div>`;
-        html += `<div class="popup-value" style="font-size: 0.75rem;">${parsedMessage.topic}</div>`;
+        html += `<div class="popup-value" style="font-size: 0.75rem; word-break: break-all;">${esc(parsedMessage.topic)}</div>`;
         html += `</div>`;
 
         html += `<div class="popup-field">`;
         html += `<div class="popup-label">Category</div>`;
-        html += `<div class="popup-value">${parsedMessage.category}</div>`;
+        html += `<div class="popup-value">${esc(parsedMessage.category)}</div>`;
         html += `</div>`;
 
         if (parsedMessage.pubtime) {
             html += `<div class="popup-field">`;
             html += `<div class="popup-label">Published</div>`;
-            html += `<div class="popup-value">${new Date(parsedMessage.pubtime).toLocaleString()}</div>`;
+            html += `<div class="popup-value">${esc(new Date(parsedMessage.pubtime).toLocaleString())}</div>`;
             html += `</div>`;
         }
 
-        if (parsedMessage.dataId) {
-            html += `<div class="popup-field">`;
-            html += `<div class="popup-label">Data ID</div>`;
-            html += `<div class="popup-value" style="font-size: 0.75rem; word-break: break-all;">${parsedMessage.dataId}</div>`;
-            html += `</div>`;
-        }
-
-        if (parsedMessage.geometry.type === 'Point') {
+        if (parsedMessage.geometry && parsedMessage.geometry.type === 'Point') {
             const [lon, lat] = parsedMessage.geometry.coordinates;
             html += `<div class="popup-field">`;
             html += `<div class="popup-label">Coordinates</div>`;
@@ -222,6 +221,7 @@ class MapViewer {
             html += `</div>`;
         }
 
+        html += `<button class="popup-details-btn" data-msg-id="${esc(parsedMessage.id)}">View details &amp; GDC links</button>`;
         html += '</div>';
         return html;
     }
@@ -277,6 +277,7 @@ class MapViewer {
         if (marker) {
             marker.remove();
             this.markerMap.delete(id);
+            this.messageMap.delete(id);
 
             // Remove from markers array
             const index = this.markers.findIndex(m => m.id === id);
@@ -326,6 +327,7 @@ class MapViewer {
         });
         this.markers = [];
         this.markerMap.clear();
+        this.messageMap.clear();
     }
 
     /**

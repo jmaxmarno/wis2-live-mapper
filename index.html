@@ -5,23 +5,28 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WIS2 Live Mapper</title>
 
+    <!-- Open Sans (the typeface used across WMO branding) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 
     <!-- Custom CSS -->
     <link rel="stylesheet" href="css/styles.css">
 </head>
-<body class="bg-gray-900 text-gray-100">
+<body>
     <!-- Header -->
-    <header class="bg-gray-800 border-b border-gray-700 px-4 py-3">
+    <header class="app-header">
         <div class="flex items-center justify-between">
-            <h1 class="text-xl font-bold">WIS2 Live Mapper</h1>
+            <h1 class="text-xl font-bold tracking-tight">WIS2 Live Mapper</h1>
             <div class="flex items-center gap-4">
                 <div id="connection-status" class="flex items-center gap-2">
                     <span class="status-indicator disconnected"></span>
                     <span id="status-text">Disconnected</span>
                 </div>
-                <button id="config-btn" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded">
+                <button id="config-btn" class="btn btn-on-header">
                     Configure
                 </button>
             </div>
@@ -31,13 +36,13 @@
     <!-- Main Content -->
     <div class="flex h-[calc(100vh-60px)]">
         <!-- Statistics Panel -->
-        <aside id="stats-panel" class="bg-gray-800 border-r border-gray-700 overflow-y-auto relative" style="width: 320px; flex-shrink: 0;">
+        <aside id="stats-panel" class="overflow-y-auto relative" style="width: 320px; flex-shrink: 0;">
             <div id="stats-panel-resize-handle" title="Drag to resize"></div>
             <div class="p-4">
-                <h2 class="text-lg font-semibold mb-4">Statistics</h2>
+                <h2 class="panel-heading">Statistics</h2>
 
                 <!-- Summary Stats -->
-                <div class="mb-4 p-3 bg-gray-700 rounded">
+                <div class="summary-card">
                     <div class="flex justify-between mb-2">
                         <span>Total Messages:</span>
                         <span id="total-messages" class="font-bold">0</span>
@@ -57,7 +62,7 @@
                     <!-- Topic hierarchy will be dynamically inserted here -->
                 </div>
 
-                <button id="clear-map-btn" class="w-full mt-4 px-4 py-2 bg-red-600 hover:bg-red-700 rounded">
+                <button id="clear-map-btn" class="btn btn-danger w-full mt-4">
                     Clear All
                 </button>
             </div>
@@ -68,7 +73,7 @@
             <div id="map" class="w-full h-full"></div>
 
             <!-- Map Controls Overlay -->
-            <div class="absolute bottom-4 left-4 bg-gray-800 bg-opacity-90 rounded p-2 text-sm">
+            <div class="map-info-overlay">
                 <div id="map-info">
                     <div>Messages: <span id="map-message-count">0</span></div>
                     <div>Shown: <span id="map-shown-count">0</span></div>
@@ -77,29 +82,51 @@
         </main>
     </div>
 
-    <!-- No-Geometry Messages Modal -->
-    <div id="nogeo-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center">
-        <div class="bg-gray-800 rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col p-6">
-            <div class="flex justify-between items-center mb-2">
-                <h2 class="text-xl font-bold">Messages without geometry</h2>
-                <button id="close-nogeo-btn" class="text-gray-400 hover:text-gray-200">
+    <!-- Payload Detail Modal -->
+    <div id="payload-modal" class="modal hidden items-center justify-center">
+        <div class="modal-card max-w-3xl max-h-[85vh] flex flex-col">
+            <div class="flex justify-between items-start mb-2 gap-3">
+                <div class="flex-1 min-w-0">
+                    <h2 class="text-xl font-bold modal-heading">Message payload</h2>
+                    <div id="payload-topic" class="text-xs text-muted font-mono break-all mt-1"></div>
+                </div>
+                <button id="close-payload-btn" class="modal-close" aria-label="Close">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                     </svg>
                 </button>
             </div>
-            <div class="text-xs text-gray-400 mb-1">Topic: <span id="nogeo-topic-filter" class="font-mono"></span></div>
-            <div id="nogeo-count-label" class="text-xs text-gray-500 mb-3"></div>
+            <div id="payload-gdc-links" class="payload-gdc-section"></div>
+            <div class="payload-toolbar">
+                <button id="payload-copy-btn" class="btn btn-secondary text-sm">Copy JSON</button>
+            </div>
+            <pre id="payload-json" class="payload-json"></pre>
+        </div>
+    </div>
+
+    <!-- No-Geometry Messages Modal -->
+    <div id="nogeo-modal" class="modal hidden items-center justify-center">
+        <div class="modal-card max-w-2xl max-h-[80vh] flex flex-col">
+            <div class="flex justify-between items-center mb-2">
+                <h2 class="text-xl font-bold modal-heading">Messages without geometry</h2>
+                <button id="close-nogeo-btn" class="modal-close" aria-label="Close">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            <div class="text-xs text-muted mb-1">Topic: <span id="nogeo-topic-filter" class="font-mono"></span></div>
+            <div id="nogeo-count-label" class="text-xs text-muted mb-3"></div>
             <div id="nogeo-list" class="overflow-y-auto flex-1 space-y-2 pr-1"></div>
         </div>
     </div>
 
     <!-- Configuration Modal -->
-    <div id="config-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
-        <div class="bg-gray-800 rounded-lg shadow-xl w-full max-w-md p-6">
+    <div id="config-modal" class="modal hidden items-center justify-center">
+        <div class="modal-card max-w-md">
             <div class="flex justify-between items-center mb-4">
-                <h2 class="text-xl font-bold">Configuration</h2>
-                <button id="close-config-btn" class="text-gray-400 hover:text-gray-200">
+                <h2 class="text-xl font-bold modal-heading">Configuration</h2>
+                <button id="close-config-btn" class="modal-close" aria-label="Close">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                     </svg>
@@ -109,15 +136,15 @@
             <form id="config-form" class="space-y-4">
                 <!-- Broker Selection -->
                 <div>
-                    <label class="block text-sm font-medium mb-2">Global Broker</label>
-                    <select id="broker-select" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2">
+                    <label class="form-label">Global Broker</label>
+                    <select id="broker-select" class="form-control">
                         <!-- Options will be populated dynamically -->
                     </select>
                 </div>
 
                 <!-- Protocol Selection -->
                 <div>
-                    <label class="block text-sm font-medium mb-2">Connection Protocol</label>
+                    <label class="form-label">Connection Protocol</label>
                     <div id="protocol-options" class="space-y-2">
                         <!-- Radio buttons will be populated dynamically -->
                     </div>
@@ -125,7 +152,7 @@
 
                 <!-- Topics -->
                 <div>
-                    <label class="block text-sm font-medium mb-2">Topics to Subscribe</label>
+                    <label class="form-label">Topics to Subscribe</label>
                     <div id="topic-checkboxes" class="space-y-2">
                         <!-- Checkboxes will be populated dynamically -->
                     </div>
@@ -133,34 +160,34 @@
 
                 <!-- Display Settings -->
                 <div>
-                    <label class="block text-sm font-medium mb-2">Max Markers</label>
-                    <input type="number" id="max-messages" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2" min="100" max="5000" step="100">
+                    <label class="form-label">Max Markers</label>
+                    <input type="number" id="max-messages" class="form-control" min="100" max="5000" step="100">
                 </div>
 
                 <div>
-                    <label class="block text-sm font-medium mb-2">Fade Duration (seconds)</label>
-                    <input type="number" id="fade-duration" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2" min="5" max="300" step="5">
+                    <label class="form-label">Fade Duration (seconds)</label>
+                    <input type="number" id="fade-duration" class="form-control" min="5" max="300" step="5">
                 </div>
 
                 <!-- Action Buttons -->
                 <div class="flex gap-2 mt-6">
-                    <button type="button" id="connect-btn" class="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 rounded">
+                    <button type="button" id="connect-btn" class="btn btn-primary flex-1">
                         Connect
                     </button>
-                    <button type="button" id="disconnect-btn" class="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 rounded">
+                    <button type="button" id="disconnect-btn" class="btn btn-secondary flex-1">
                         Disconnect
                     </button>
                 </div>
             </form>
 
-            <div id="connection-info" class="mt-4 p-3 bg-gray-700 rounded text-sm hidden">
+            <div id="connection-info" class="mt-4 p-3 summary-card text-sm hidden">
                 <div class="font-medium mb-1">Connection Details</div>
-                <div id="connection-details" class="text-xs text-gray-300"></div>
+                <div id="connection-details" class="text-xs text-muted"></div>
             </div>
         </div>
     </div>
 
-    <!-- Tailwind CSS -->
+    <!-- Tailwind CSS (utilities only — colors handled in styles.css) -->
     <script src="https://cdn.tailwindcss.com"></script>
 
     <!-- Leaflet JS -->
@@ -173,6 +200,7 @@
     <script src="js/config-manager.js"></script>
     <script src="js/message-parser.js"></script>
     <script src="js/mqtt-client.js"></script>
+    <script src="js/gdc-link.js"></script>
     <script src="js/map-viewer.js"></script>
     <script src="js/stats-panel.js"></script>
     <script src="js/app.js"></script>

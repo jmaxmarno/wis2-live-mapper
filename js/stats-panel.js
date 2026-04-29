@@ -3,9 +3,10 @@
  * Manages the topic hierarchy tree and message statistics
  */
 class StatsPanel {
-    constructor(containerId) {
+    constructor(containerId, gdcs) {
         this.containerId = containerId;
         this.container = document.getElementById(containerId);
+        this.gdcs = gdcs || [];
         this.topicTree = {};
         this.topicCounts = {};
         this.noGeoCounts = {};
@@ -184,6 +185,30 @@ class StatsPanel {
         return html;
     }
 
+    renderGdcLinksFor(noGeoItem) {
+        if (!this.gdcs || this.gdcs.length === 0) return '';
+        if (typeof GDCLinks === 'undefined') return '';
+
+        // The buffered no-geo entry doesn't carry the topic in the shape buildAllLinks expects
+        // beyond what we stored — it has topic, metadataId. Adapt minimally.
+        const linkSet = GDCLinks.buildAllLinks(
+            { topic: noGeoItem.topic, metadataId: noGeoItem.metadataId },
+            this.gdcs
+        );
+        if (linkSet.links.length === 0) return '';
+
+        const escAttr = (s) => this.escapeHtml(s);
+        const buttons = linkSet.links.map(l =>
+            `<a class="gdc-link" href="${escAttr(l.url)}" target="_blank" rel="noopener noreferrer">${this.escapeHtml(l.name)} <span aria-hidden="true">↗</span></a>`
+        ).join('');
+
+        const label = linkSet.kind === 'record'
+            ? 'GDC record:'
+            : `GDC search (centre <code>${this.escapeHtml(linkSet.centre)}</code>):`;
+
+        return `<div class="payload-gdc-section mt-2"><div class="gdc-section-label">${label}</div><div class="gdc-link-list">${buttons}</div></div>`;
+    }
+
     escapeHtml(str) {
         if (str == null) return '';
         return String(str)
@@ -212,18 +237,20 @@ class StatsPanel {
         }
 
         if (matching.length === 0) {
-            list.innerHTML = '<div class="text-gray-400 text-sm">No recent messages buffered for this topic.</div>';
+            list.innerHTML = '<div class="text-muted text-sm">No recent messages buffered for this topic.</div>';
         } else {
             list.innerHTML = matching.slice(0, 100).map(m => {
                 const linksHtml = (m.links || []).map(l =>
-                    `<a href="${this.escapeHtml(l.href)}" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:underline break-all block text-xs">${this.escapeHtml(l.rel || 'link')}: ${this.escapeHtml(l.href)}</a>`
+                    `<a href="${this.escapeHtml(l.href)}" target="_blank" rel="noopener noreferrer" class="nogeo-link">${this.escapeHtml(l.rel || 'link')}: ${this.escapeHtml(l.href)}</a>`
                 ).join('');
+                const gdcHtml = this.renderGdcLinksFor(m);
                 return `
-                    <div class="bg-gray-700 rounded p-3 text-sm">
-                        <div class="text-xs text-gray-400 break-all mb-1">${this.escapeHtml(m.topic)}</div>
-                        <div class="mb-1"><span class="text-gray-400">pubtime:</span> ${this.escapeHtml(m.pubtime || '—')}</div>
-                        ${m.dataId ? `<div class="break-all mb-1"><span class="text-gray-400">data_id:</span> ${this.escapeHtml(m.dataId)}</div>` : ''}
+                    <div class="nogeo-item">
+                        <div class="text-xs text-muted break-all mb-1">${this.escapeHtml(m.topic)}</div>
+                        <div class="mb-1"><span class="text-muted">pubtime:</span> ${this.escapeHtml(m.pubtime || '—')}</div>
+                        ${m.dataId ? `<div class="break-all mb-1"><span class="text-muted">data_id:</span> ${this.escapeHtml(m.dataId)}</div>` : ''}
                         ${linksHtml ? `<div class="mt-2 space-y-1">${linksHtml}</div>` : ''}
+                        ${gdcHtml}
                     </div>
                 `;
             }).join('');
