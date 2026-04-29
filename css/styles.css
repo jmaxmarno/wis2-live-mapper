@@ -66,6 +66,22 @@ body {
     color: var(--wmo-text);
 }
 
+/* Buffer fill gauge */
+.buffer-gauge {
+    height: 6px;
+    background-color: rgba(0, 63, 135, 0.12);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.buffer-gauge-fill {
+    height: 100%;
+    width: 0%;
+    background-color: var(--wmo-blue);
+    transition: width 0.25s ease, background-color 0.25s ease;
+}
+.buffer-gauge-fill.warn   { background-color: var(--wmo-warning); }
+.buffer-gauge-fill.danger { background-color: var(--wmo-danger); }
+
 /* Buttons */
 .btn {
     padding: 0.5rem 1rem;

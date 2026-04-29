@@ -38,7 +38,7 @@ class WIS2LiveMapper {
         // Initialize components
         this.messageParser = new MessageParser(categoryColors);
         this.mqttClient = new MQTTClient();
-        this.recentMessages = new RecentMessages(config.settings.maxMessages);
+        this.recentMessages = new RecentMessages((config.settings.maxBufferMB || 25) * 1024 * 1024);
         this.mapViewer = new MapViewer('map', config);
         this.statsPanel = new StatsPanel('topic-tree', config.gdcs || []);
 
@@ -261,7 +261,7 @@ class WIS2LiveMapper {
         if (configForm) {
             configForm.addEventListener('change', () => this.markConfigDirty(true));
             configForm.addEventListener('input', (e) => {
-                if (e.target && (e.target.id === 'max-messages' || e.target.id === 'fade-duration')) {
+                if (e.target && (e.target.id === 'max-buffer-mb' || e.target.id === 'fade-duration')) {
                     this.markConfigDirty(true);
                 }
             });
@@ -328,8 +328,10 @@ class WIS2LiveMapper {
         });
 
         // Set default values
-        document.getElementById('max-messages').value = config.settings.maxMessages;
+        document.getElementById('max-buffer-mb').value = config.settings.maxBufferMB ?? 25;
         document.getElementById('fade-duration').value = config.settings.markerFadeDuration;
+        // Reflect the cap in the gauge legend immediately
+        document.getElementById('buffer-mb-max').textContent = String(config.settings.maxBufferMB ?? 25);
 
         // Update protocol options for default broker
         this.updateProtocolOptions(config.defaultBroker);
@@ -486,20 +488,21 @@ class WIS2LiveMapper {
         }
 
         // Update settings
-        const maxMessages = parseInt(document.getElementById('max-messages').value, 10);
+        const maxBufferMB = parseInt(document.getElementById('max-buffer-mb').value, 10);
         const fadeDuration = parseInt(document.getElementById('fade-duration').value, 10);
 
-        this.configManager.config.settings.maxMessages = maxMessages;
+        this.configManager.config.settings.maxBufferMB = maxBufferMB;
         this.configManager.config.settings.markerFadeDuration = fadeDuration;
-        if (this.recentMessages) this.recentMessages.setMaxSize(maxMessages);
+        if (this.recentMessages) this.recentMessages.setMaxBytes(maxBufferMB * 1024 * 1024);
         this.mapViewer.fadeDuration = fadeDuration * 1000;
+        document.getElementById('buffer-mb-max').textContent = String(maxBufferMB);
 
         // Save preferences
         this.configManager.saveUserPreferences({
             selectedBroker: brokerId,
             selectedProtocol: protocol,
             settings: {
-                maxMessages: maxMessages,
+                maxBufferMB: maxBufferMB,
                 markerFadeDuration: fadeDuration
             }
         });
@@ -584,6 +587,43 @@ class WIS2LiveMapper {
         document.getElementById('map-message-count').textContent = this.messageCount.toLocaleString();
         document.getElementById('map-shown-count').textContent = onMap.toLocaleString();
         document.getElementById('visible-markers').textContent = buffered.toLocaleString();
+        this.updateBufferGauge();
+    }
+
+    /**
+     * Update the buffer-fill gauge: percentage, MB display, color tier,
+     * and the "oldest message" age. Called both on every add/remove
+     * (via updateMapInfo) and on a 1 s tick (so age advances when idle).
+     */
+    updateBufferGauge() {
+        if (!this.recentMessages) return;
+        const bytes = this.recentMessages.byteSize();
+        const max = this.recentMessages.maxBytes;
+        const pct = max > 0 ? (bytes / max) * 100 : 0;
+
+        const mbEl = document.getElementById('buffer-mb');
+        const fill = document.getElementById('buffer-gauge-fill');
+        const oldestEl = document.getElementById('buffer-oldest');
+
+        if (mbEl) mbEl.textContent = (bytes / 1024 / 1024).toFixed(2);
+        if (fill) {
+            fill.style.width = Math.min(100, pct).toFixed(1) + '%';
+            fill.classList.toggle('warn',   pct >= 70 && pct < 90);
+            fill.classList.toggle('danger', pct >= 90);
+        }
+        if (oldestEl) {
+            const t = this.recentMessages.oldestReceivedAt();
+            oldestEl.textContent = t ? WIS2LiveMapper.formatAge(Date.now() - t) : '—';
+        }
+    }
+
+    static formatAge(ms) {
+        const sec = Math.max(0, Math.floor(ms / 1000));
+        if (sec < 60) return `${sec}s`;
+        const min = Math.floor(sec / 60);
+        if (min < 60) return `${min}m ${sec % 60}s`;
+        const hr = Math.floor(min / 60);
+        return `${hr}h ${min % 60}m`;
     }
 
     /**
@@ -595,6 +635,8 @@ class WIS2LiveMapper {
             this.messageTimestamps = this.messageTimestamps.filter(ts => ts > fiveSecondsAgo);
             const rate = this.messageTimestamps.length / 5;
             document.getElementById('messages-per-second').textContent = rate.toFixed(1);
+            // Tick the gauge so "Oldest" advances even when no messages arrive.
+            this.updateBufferGauge();
         }, 1000);
     }
 
