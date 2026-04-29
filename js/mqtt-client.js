@@ -41,7 +41,7 @@ class MQTTClient {
 
         try {
             // Generate a unique client ID
-            const clientId = 'wis2-mapper-' + Math.random().toString(16).substr(2, 8);
+            const clientId = 'wis2-mapper-' + Math.random().toString(16).slice(2, 10);
 
             // Build connection URL with credentials
             let url = connection.url;
@@ -226,24 +226,6 @@ class MQTTClient {
         this.emitStatus('disconnected', 'Disconnected');
     }
 
-    /**
-     * Get connection status
-     * @returns {object} Status object
-     */
-    getStatus() {
-        return {
-            connected: this.connected,
-            connecting: this.connecting,
-            broker: this.currentBroker,
-            protocol: this.currentProtocol,
-            topics: this.subscribedTopics
-        };
-    }
-
-    /**
-     * Check if connected
-     * @returns {boolean} True if connected
-     */
     isConnected() {
         return this.connected;
     }

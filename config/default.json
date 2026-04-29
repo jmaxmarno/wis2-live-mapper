@@ -111,7 +111,6 @@
     "markerFadeDuration": 30,
     "defaultZoom": 2,
     "defaultCenter": [0, 0],
-    "updateInterval": 100,
     "markerSize": 8
   }
 }

@@ -99,7 +99,7 @@ class StatsPanel {
             const noGeoCount = this.noGeoCounts[node.fullPath] || 0;
             const hasChildren = Object.keys(node.children).length > 0;
             const isExpanded = this.expandedTopics.has(node.fullPath);
-            const path = this.escapeHtml(node.fullPath);
+            const path = escapeHtml(node.fullPath);
 
             html += '<div class="topic-item-container">';
             html += `<div class="topic-item" data-topic="${path}">`;
@@ -112,7 +112,7 @@ class StatsPanel {
             if (node.color) {
                 html += `<span class="topic-color-indicator" style="background-color: ${node.color};"></span>`;
             }
-            html += `<span class="topic-name">${this.escapeHtml(node.name)}</span>`;
+            html += `<span class="topic-name">${escapeHtml(node.name)}</span>`;
             html += `<span class="topic-count">${count.toLocaleString()}</span>`;
 
             // Browse icon — opens list modal for "all messages with this prefix"
@@ -168,15 +168,5 @@ class StatsPanel {
         this.topicCounts = {};
         this.noGeoCounts = {};
         this.render();
-    }
-
-    escapeHtml(str) {
-        if (str == null) return '';
-        return String(str)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
     }
 }

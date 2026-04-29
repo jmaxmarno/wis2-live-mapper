@@ -403,22 +403,6 @@ body {
     box-shadow: 0 0 0 3px rgba(0, 63, 135, 0.15);
 }
 
-.nogeo-item {
-    background-color: var(--wmo-surface-alt);
-    border: 1px solid var(--wmo-border);
-    border-radius: 0.375rem;
-    padding: 0.75rem;
-    font-size: 0.875rem;
-}
-
-.nogeo-link {
-    color: var(--wmo-blue-medium);
-    word-break: break-all;
-    display: block;
-    font-size: 0.75rem;
-}
-.nogeo-link:hover { text-decoration: underline; color: var(--wmo-blue); }
-
 /* Payload modal */
 .payload-gdc-section {
     background-color: var(--wmo-blue-pale);
@@ -489,14 +473,6 @@ body {
 .json-number { color: #b45309; }
 .json-boolean { color: #6d28d9; font-weight: 600; }
 .json-null { color: var(--wmo-text-subtle); font-style: italic; }
-
-/* Compact GDC link in popups and lists */
-.gdc-link-inline {
-    color: var(--wmo-blue);
-    text-decoration: none;
-    font-weight: 600;
-}
-.gdc-link-inline:hover { text-decoration: underline; }
 
 /* Popup details button */
 .popup-details-btn {

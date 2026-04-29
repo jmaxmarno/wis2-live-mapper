@@ -128,21 +128,17 @@ class MapViewer {
     }
 
     createPopupContent(parsedMessage) {
-        const esc = (s) => String(s == null ? '' : s)
-            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-
         let html = '<div style="min-width: 220px;">';
-        html += `<div class="popup-field"><div class="popup-label">Topic</div><div class="popup-value" style="font-size: 0.75rem; word-break: break-all;">${esc(parsedMessage.topic)}</div></div>`;
-        html += `<div class="popup-field"><div class="popup-label">Category</div><div class="popup-value">${esc(parsedMessage.category)}</div></div>`;
+        html += `<div class="popup-field"><div class="popup-label">Topic</div><div class="popup-value" style="font-size: 0.75rem; word-break: break-all;">${escapeHtml(parsedMessage.topic)}</div></div>`;
+        html += `<div class="popup-field"><div class="popup-label">Category</div><div class="popup-value">${escapeHtml(parsedMessage.category)}</div></div>`;
         if (parsedMessage.pubtime) {
-            html += `<div class="popup-field"><div class="popup-label">Published</div><div class="popup-value">${esc(new Date(parsedMessage.pubtime).toLocaleString())}</div></div>`;
+            html += `<div class="popup-field"><div class="popup-label">Published</div><div class="popup-value">${escapeHtml(new Date(parsedMessage.pubtime).toLocaleString())}</div></div>`;
         }
         if (parsedMessage.geometry && parsedMessage.geometry.type === 'Point') {
             const [lon, lat] = parsedMessage.geometry.coordinates;
             html += `<div class="popup-field"><div class="popup-label">Coordinates</div><div class="popup-value">${lat.toFixed(4)}, ${lon.toFixed(4)}</div></div>`;
         }
-        html += `<button class="popup-details-btn" data-msg-id="${esc(parsedMessage.id)}">View details &amp; GDC links</button>`;
+        html += `<button class="popup-details-btn" data-msg-id="${escapeHtml(parsedMessage.id)}">View details &amp; GDC links</button>`;
         html += '</div>';
         return html;
     }

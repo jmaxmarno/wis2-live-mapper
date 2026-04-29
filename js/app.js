@@ -11,8 +11,6 @@ class WIS2LiveMapper {
         this.messageParser = null;
 
         this.messageCount = 0;
-        this.messageRate = 0;
-        this.lastMessageTime = Date.now();
         this.messageTimestamps = [];
 
         this.currentBroker = null;
@@ -29,12 +27,28 @@ class WIS2LiveMapper {
         this.configManager = new ConfigManager();
         const config = await this.configManager.init();
 
+        // Derive category → color from the topics config so there's a single
+        // source of truth for "blue/green/amber" between the parser and consumers.
+        const categoryColors = {};
+        (config.topics || []).forEach(t => {
+            const category = (t.pattern || '').split('/')[0];
+            if (category) categoryColors[category] = t.color;
+        });
+
         // Initialize components
-        this.messageParser = new MessageParser();
+        this.messageParser = new MessageParser(categoryColors);
         this.mqttClient = new MQTTClient();
         this.recentMessages = new RecentMessages(config.settings.maxMessages);
         this.mapViewer = new MapViewer('map', config);
         this.statsPanel = new StatsPanel('topic-tree', config.gdcs || []);
+
+        // Wire modal close affordances; programmatic open via this.modals.<name>.open()
+        this.modals = {
+            about:       wireModal('about-modal'),
+            config:      wireModal('config-modal'),
+            payload:     wireModal('payload-modal'),
+            messageList: wireModal('message-list-modal')
+        };
 
         // Initialize map
         this.mapViewer.init();
@@ -69,9 +83,6 @@ class WIS2LiveMapper {
 
         // Wire the payload-detail modal (opens when a popup "View details" button is clicked)
         this.setupPayloadModal();
-
-        // Wire the message-list modal (opens via ⋯ / ⚠ in the topic tree)
-        this.setupMessageListModal();
 
         // Populate configuration UI
         this.populateConfigUI(config);
@@ -124,26 +135,16 @@ class WIS2LiveMapper {
     }
 
     /**
-     * Set up the payload-detail modal: clicks on popup details buttons,
-     * close, copy-to-clipboard, click-outside-to-close.
+     * Wire the Copy-JSON button and the global "view details" click delegation.
+     * (Modal close affordances are wired by wireModal.)
      */
     setupPayloadModal() {
-        const modal = document.getElementById('payload-modal');
-        const closeBtn = document.getElementById('close-payload-btn');
         const copyBtn = document.getElementById('payload-copy-btn');
-
-        if (closeBtn) closeBtn.addEventListener('click', () => modal.classList.remove('active'));
-        if (modal) {
-            modal.addEventListener('click', (e) => {
-                if (e.target.id === 'payload-modal') modal.classList.remove('active');
-            });
-        }
         if (copyBtn) {
             copyBtn.addEventListener('click', async () => {
                 if (!this.currentPayload) return;
-                const text = JSON.stringify(this.currentPayload, null, 2);
                 try {
-                    await navigator.clipboard.writeText(text);
+                    await navigator.clipboard.writeText(JSON.stringify(this.currentPayload, null, 2));
                     const orig = copyBtn.textContent;
                     copyBtn.textContent = 'Copied!';
                     setTimeout(() => { copyBtn.textContent = orig; }, 1500);
@@ -153,59 +154,48 @@ class WIS2LiveMapper {
             });
         }
 
-        // Event delegation: open the modal when any popup-details button is clicked
+        // Any "View details" button (in popups or in the message-list modal) opens the payload modal.
         document.addEventListener('click', (e) => {
             const btn = e.target.closest('.popup-details-btn');
             if (!btn) return;
             e.preventDefault();
-            const id = btn.dataset.msgId;
-            const msg = this.recentMessages && this.recentMessages.get(id);
+            const msg = this.recentMessages?.get(btn.dataset.msgId);
             if (msg) this.showPayloadModal(msg);
         });
     }
 
     showPayloadModal(parsedMessage) {
-        const modal = document.getElementById('payload-modal');
         const topicEl = document.getElementById('payload-topic');
         const linksEl = document.getElementById('payload-gdc-links');
         const jsonEl = document.getElementById('payload-json');
-        if (!modal || !jsonEl) return;
+        if (!jsonEl) return;
 
         this.currentPayload = parsedMessage.raw || parsedMessage;
 
         if (topicEl) topicEl.textContent = parsedMessage.topic || '';
 
         // GDC links — one per configured GDC (record link if metadata_id present, else centre search)
-        const gdcs = (this.configManager && this.configManager.config && this.configManager.config.gdcs) || [];
-        const linkSet = (typeof GDCLinks !== 'undefined') ? GDCLinks.buildAllLinks(parsedMessage, gdcs) : { kind: 'none', links: [] };
+        const gdcs = this.configManager?.config?.gdcs || [];
+        const linkSet = (typeof GDCLinks !== 'undefined')
+            ? GDCLinks.buildAllLinks(parsedMessage, gdcs)
+            : { kind: 'none', links: [] };
         linksEl.innerHTML = this.renderGdcLinks(linkSet);
 
-        // Pretty-printed, syntax-highlighted JSON
         jsonEl.innerHTML = this.formatJsonHtml(this.currentPayload);
-
-        modal.classList.add('active');
+        this.modals.payload.open();
     }
 
     renderGdcLinks(linkSet) {
-        const escAttr = (s) => String(s == null ? '' : s)
-            .replace(/&/g, '&amp;').replace(/"/g, '&quot;')
-            .replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        const escText = (s) => String(s == null ? '' : s)
-            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
         if (!linkSet.links.length) {
             return '<div class="gdc-section-empty">No GDC link available — message has no metadata_id and no parseable centre id.</div>';
         }
 
-        let label;
-        if (linkSet.kind === 'record') {
-            label = 'Discovery-metadata record:';
-        } else {
-            label = `No metadata_id — search centre <code>${escText(linkSet.centre)}</code> on:`;
-        }
+        const label = linkSet.kind === 'record'
+            ? 'Discovery-metadata record:'
+            : `No metadata_id — search centre <code>${escapeHtml(linkSet.centre)}</code> on:`;
 
         const buttons = linkSet.links.map(l =>
-            `<a class="gdc-link" href="${escAttr(l.url)}" target="_blank" rel="noopener noreferrer">${escText(l.name)} <span aria-hidden="true">↗</span></a>`
+            `<a class="gdc-link" href="${escapeHtml(l.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(l.name)} <span aria-hidden="true">↗</span></a>`
         ).join('');
 
         return `<div class="gdc-section-label">${label}</div><div class="gdc-link-list">${buttons}</div>`;
@@ -248,61 +238,21 @@ class WIS2LiveMapper {
      * Set up UI event handlers
      */
     setupUIHandlers() {
-        // About button — toggles the info modal
-        const aboutBtn = document.getElementById('about-btn');
-        const aboutModal = document.getElementById('about-modal');
-        const closeAboutBtn = document.getElementById('close-about-btn');
-        if (aboutBtn && aboutModal) {
-            aboutBtn.addEventListener('click', () => aboutModal.classList.add('active'));
-        }
-        if (closeAboutBtn && aboutModal) {
-            closeAboutBtn.addEventListener('click', () => aboutModal.classList.remove('active'));
-        }
-        if (aboutModal) {
-            aboutModal.addEventListener('click', (e) => {
-                if (e.target.id === 'about-modal') aboutModal.classList.remove('active');
-            });
-        }
+        // Modal openers (close affordances are wired by wireModal in init).
+        document.getElementById('about-btn').addEventListener('click', () => this.modals.about.open());
+        document.getElementById('config-btn').addEventListener('click', () => this.modals.config.open());
 
-        // Config button
-        document.getElementById('config-btn').addEventListener('click', () => {
-            this.showConfigModal();
-        });
+        // Action buttons
+        document.getElementById('connect-btn').addEventListener('click', () => this.connect());
+        document.getElementById('disconnect-btn').addEventListener('click', () => this.disconnect());
+        document.getElementById('clear-map-btn').addEventListener('click', () => this.clearMap());
 
-        // Close config button
-        document.getElementById('close-config-btn').addEventListener('click', () => {
-            this.hideConfigModal();
-        });
-
-        // Connect button
-        document.getElementById('connect-btn').addEventListener('click', () => {
-            this.connect();
-        });
-
-        // Disconnect button
-        document.getElementById('disconnect-btn').addEventListener('click', () => {
-            this.disconnect();
-        });
-
-        // Clear map button
-        document.getElementById('clear-map-btn').addEventListener('click', () => {
-            this.clearMap();
-        });
-
-        // Close modal on outside click
-        document.getElementById('config-modal').addEventListener('click', (e) => {
-            if (e.target.id === 'config-modal') {
-                this.hideConfigModal();
-            }
-        });
-
-        // Broker selection change
+        // Broker selection drives the available protocol radios.
         document.getElementById('broker-select').addEventListener('change', (e) => {
             this.updateProtocolOptions(e.target.value);
         });
 
-        // Dirty tracking: any change to a config control marks the form as dirty
-        // and prompts the user to click Connect. Cleared after a successful connect().
+        // Dirty tracking: any change/input on a config control prompts the user to click Connect.
         const configForm = document.getElementById('config-form');
         if (configForm) {
             configForm.addEventListener('change', () => this.markConfigDirty(true));
@@ -498,20 +448,6 @@ class WIS2LiveMapper {
     }
 
     /**
-     * Show configuration modal
-     */
-    showConfigModal() {
-        document.getElementById('config-modal').classList.add('active');
-    }
-
-    /**
-     * Hide configuration modal
-     */
-    hideConfigModal() {
-        document.getElementById('config-modal').classList.remove('active');
-    }
-
-    /**
      * Connect to broker
      */
     connect() {
@@ -546,8 +482,8 @@ class WIS2LiveMapper {
         }
 
         // Update settings
-        const maxMessages = parseInt(document.getElementById('max-messages').value);
-        const fadeDuration = parseInt(document.getElementById('fade-duration').value);
+        const maxMessages = parseInt(document.getElementById('max-messages').value, 10);
+        const fadeDuration = parseInt(document.getElementById('fade-duration').value, 10);
 
         this.configManager.config.settings.maxMessages = maxMessages;
         this.configManager.config.settings.markerFadeDuration = fadeDuration;
@@ -579,7 +515,7 @@ class WIS2LiveMapper {
         this.markConfigDirty(false);
 
         // Hide modal
-        this.hideConfigModal();
+        this.modals.config.close();
     }
 
     /**
@@ -587,7 +523,7 @@ class WIS2LiveMapper {
      */
     disconnect() {
         this.mqttClient.disconnect();
-        this.hideConfigModal();
+        this.modals.config.close();
     }
 
     /**
@@ -626,19 +562,6 @@ class WIS2LiveMapper {
         statusIndicator.className = 'status-indicator ' + status;
         statusText.textContent = message;
         this.lastShownStatus = status;
-
-        // Update connection info in modal
-        if (status === 'connected') {
-            const connectionInfo = document.getElementById('connection-info');
-            const connectionDetails = document.getElementById('connection-details');
-
-            connectionDetails.innerHTML = `
-                <div>Broker: ${this.currentBroker.name}</div>
-                <div>Protocol: ${this.currentProtocol.toUpperCase()}</div>
-                <div>Topics: ${this.mqttClient.subscribedTopics.length}</div>
-            `;
-            connectionInfo.classList.remove('hidden');
-        }
     }
 
     /**
@@ -664,18 +587,9 @@ class WIS2LiveMapper {
      */
     startMessageRateCalculation() {
         setInterval(() => {
-            // Calculate messages per second over last 5 seconds
-            const now = Date.now();
-            const fiveSecondsAgo = now - 5000;
-
-            // Remove old timestamps
+            const fiveSecondsAgo = Date.now() - 5000;
             this.messageTimestamps = this.messageTimestamps.filter(ts => ts > fiveSecondsAgo);
-
-            // Calculate rate
             const rate = this.messageTimestamps.length / 5;
-            this.messageRate = rate;
-
-            // Update display
             document.getElementById('messages-per-second').textContent = rate.toFixed(1);
         }, 1000);
     }
@@ -688,40 +602,24 @@ class WIS2LiveMapper {
 
         // Clearing the buffer cascades remove events into the map and stats panel.
         if (this.recentMessages) this.recentMessages.clear();
-        this.mapViewer.clearAllMarkers(); // belt-and-suspenders
+        this.mapViewer.clearAllMarkers();   // belt-and-suspenders
         this.statsPanel.clear();
 
         this.messageCount = 0;
         this.messageTimestamps = [];
-        this.messageRate = 0;
 
         this.updateMessageCounters();
         this.updateMapInfo();
         document.getElementById('messages-per-second').textContent = '0.0';
     }
 
-    /**
-     * Wire the message-list modal: close, click-outside, list rendering.
-     */
-    setupMessageListModal() {
-        const modal = document.getElementById('message-list-modal');
-        const closeBtn = document.getElementById('close-message-list-btn');
-        if (closeBtn) closeBtn.addEventListener('click', () => modal.classList.remove('active'));
-        if (modal) {
-            modal.addEventListener('click', (e) => {
-                if (e.target.id === 'message-list-modal') modal.classList.remove('active');
-            });
-        }
-    }
-
     showMessageList(topicPrefix, opts = {}) {
         const { noGeoOnly = false } = opts;
-        const modal = document.getElementById('message-list-modal');
         const heading = document.getElementById('message-list-heading');
         const topicEl = document.getElementById('message-list-topic');
         const countEl = document.getElementById('message-list-count');
         const listEl = document.getElementById('message-list');
-        if (!modal || !listEl) return;
+        if (!listEl) return;
 
         const all = this.recentMessages.findByTopicPrefix(topicPrefix);
         const matching = noGeoOnly ? all.filter(m => !m.hasGeometry) : all;
@@ -735,7 +633,6 @@ class WIS2LiveMapper {
         if (matching.length === 0) {
             listEl.innerHTML = '<div class="text-muted text-sm">No messages currently buffered for this topic.</div>';
         } else {
-            const esc = (s) => this.escapeHtml(s);
             listEl.innerHTML = matching.slice(0, 200).map(m => {
                 const flag = m.hasGeometry
                     ? '<span class="msg-flag msg-flag-geo">geo</span>'
@@ -744,27 +641,17 @@ class WIS2LiveMapper {
                     <div class="message-list-item">
                         <div class="flex items-center gap-2 mb-1">
                             ${flag}
-                            <span class="text-xs text-muted">${esc(new Date(m.pubtime || Date.now()).toLocaleTimeString())}</span>
+                            <span class="text-xs text-muted">${escapeHtml(new Date(m.pubtime || Date.now()).toLocaleTimeString())}</span>
                         </div>
-                        <div class="text-xs text-muted break-all mb-1">${esc(m.topic)}</div>
-                        ${m.dataId ? `<div class="text-xs break-all mb-2"><span class="text-muted">data_id:</span> ${esc(m.dataId)}</div>` : ''}
-                        <button class="popup-details-btn" data-msg-id="${esc(m.id)}">View details &amp; GDC links</button>
+                        <div class="text-xs text-muted break-all mb-1">${escapeHtml(m.topic)}</div>
+                        ${m.dataId ? `<div class="text-xs break-all mb-2"><span class="text-muted">data_id:</span> ${escapeHtml(m.dataId)}</div>` : ''}
+                        <button class="popup-details-btn" data-msg-id="${escapeHtml(m.id)}">View details &amp; GDC links</button>
                     </div>
                 `;
             }).join('');
         }
 
-        modal.classList.add('active');
-    }
-
-    escapeHtml(str) {
-        if (str == null) return '';
-        return String(str)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
+        this.modals.messageList.open();
     }
 }
 
