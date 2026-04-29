@@ -63,17 +63,21 @@ class WIS2LiveMapper {
 
         // ⋯ and ⚠ in the topic tree open the message-list modal
         this.statsPanel.onBrowseRequest((topicPrefix, opts) => {
-            this.showMessageList(topicPrefix, opts);
+            const all = this.recentMessages.findByTopicPrefix(topicPrefix);
+            const noGeoOnly = !!(opts && opts.noGeoOnly);
+            const matching = noGeoOnly ? all.filter(m => !m.hasGeometry) : all;
+            this.showMessageList(matching, {
+                heading: noGeoOnly ? 'Buffered messages without geometry' : 'Buffered messages',
+                topicLabel: topicPrefix
+            });
         });
 
-        // Set up MQTT event handlers
-        this.mqttClient.onMessage((topic, payload) => {
-            this.handleMessage(topic, payload);
-        });
+        // Single map-level click coordinator: hit-test and route to payload or picker.
+        this.mapViewer.map.on('click', (e) => this.handleMapClick(e));
 
-        this.mqttClient.onStatusChange((status, message) => {
-            this.updateConnectionStatus(status, message);
-        });
+        // MQTT event handlers (single-callback slots on the client)
+        this.mqttClient.onMessage = (topic, payload) => this.handleMessage(topic, payload);
+        this.mqttClient.onStatusChange = (status, message) => this.updateConnectionStatus(status, message);
 
         // Set up UI event handlers
         this.setupUIHandlers();
@@ -613,33 +617,38 @@ class WIS2LiveMapper {
         document.getElementById('messages-per-second').textContent = '0.0';
     }
 
-    showMessageList(topicPrefix, opts = {}) {
-        const { noGeoOnly = false } = opts;
+    /**
+     * Render a list of messages in the message-list modal. Used both for
+     * topic-prefix browsing (⋯ / ⚠) and for the multi-hit click picker.
+     *
+     * @param {Array} messages    pre-resolved parsed-message array (most-recent first)
+     * @param {{heading?: string, topicLabel?: string, footnote?: string}} options
+     */
+    showMessageList(messages, options = {}) {
         const heading = document.getElementById('message-list-heading');
         const topicEl = document.getElementById('message-list-topic');
         const countEl = document.getElementById('message-list-count');
         const listEl = document.getElementById('message-list');
         if (!listEl) return;
 
-        const all = this.recentMessages.findByTopicPrefix(topicPrefix);
-        const matching = noGeoOnly ? all.filter(m => !m.hasGeometry) : all;
-
-        if (heading) heading.textContent = noGeoOnly ? 'Buffered messages without geometry' : 'Buffered messages';
-        if (topicEl) topicEl.textContent = topicPrefix;
+        if (heading) heading.textContent = options.heading || 'Buffered messages';
+        if (topicEl) topicEl.textContent = options.topicLabel || '';
         if (countEl) {
-            countEl.textContent = `${matching.length.toLocaleString()} buffered (FIFO cap: ${this.recentMessages.maxSize.toLocaleString()})`;
+            countEl.textContent = options.footnote
+                || `${messages.length.toLocaleString()} buffered (FIFO cap: ${this.recentMessages.maxSize.toLocaleString()})`;
         }
 
-        if (matching.length === 0) {
-            listEl.innerHTML = '<div class="text-muted text-sm">No messages currently buffered for this topic.</div>';
+        if (messages.length === 0) {
+            listEl.innerHTML = '<div class="text-muted text-sm">No messages.</div>';
         } else {
-            listEl.innerHTML = matching.slice(0, 200).map(m => {
+            listEl.innerHTML = messages.slice(0, 200).map(m => {
                 const flag = m.hasGeometry
                     ? '<span class="msg-flag msg-flag-geo">geo</span>'
                     : '<span class="msg-flag msg-flag-nogeo">no-geo</span>';
                 return `
                     <div class="message-list-item">
                         <div class="flex items-center gap-2 mb-1">
+                            <span class="topic-color-indicator" style="background-color: ${escapeHtml(m.color)}"></span>
                             ${flag}
                             <span class="text-xs text-muted">${escapeHtml(new Date(m.pubtime || Date.now()).toLocaleTimeString())}</span>
                         </div>
@@ -652,6 +661,29 @@ class WIS2LiveMapper {
         }
 
         this.modals.messageList.open();
+    }
+
+    /**
+     * Map click coordinator: hit-test all visible markers and route the click.
+     *   0 hits → noop (just a normal map click)
+     *   1 hit  → open the payload modal directly
+     *   N hits → open the message-list modal as a picker
+     */
+    handleMapClick(e) {
+        if (!this.mapViewer || !this.recentMessages) return;
+        const ids = this.mapViewer.findMessageIdsAt(e.latlng);
+        if (ids.length === 0) return;
+        const messages = ids.map(id => this.recentMessages.get(id)).filter(Boolean);
+        if (messages.length === 0) return;
+        if (messages.length === 1) {
+            this.showPayloadModal(messages[0]);
+            return;
+        }
+        this.showMessageList(messages, {
+            heading: `${messages.length} items at this location`,
+            topicLabel: '(map click)',
+            footnote: 'Pick one to view its full payload.'
+        });
     }
 }
 

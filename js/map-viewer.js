@@ -78,7 +78,7 @@ class MapViewer {
 
     createPointMarker(parsedMessage) {
         const [lon, lat] = parsedMessage.geometry.coordinates;
-        const marker = L.circleMarker([lat, lon], {
+        return L.circleMarker([lat, lon], {
             radius: this.config.settings.markerSize,
             fillColor: parsedMessage.color,
             color: '#ffffff',
@@ -87,72 +87,52 @@ class MapViewer {
             fillOpacity: 0.8,
             className: 'marker-fade'
         });
-        marker.bindPopup(this.createPopupContent(parsedMessage));
-        return marker;
     }
 
     createPolygonMarker(parsedMessage) {
-        let coordinates;
-        if (parsedMessage.geometry.type === 'Polygon') {
-            coordinates = parsedMessage.geometry.coordinates[0].map(c => [c[1], c[0]]);
-        } else {
-            coordinates = parsedMessage.geometry.coordinates[0][0].map(c => [c[1], c[0]]);
-        }
-        const polygon = L.polygon(coordinates, {
+        const coordinates = parsedMessage.geometry.type === 'Polygon'
+            ? parsedMessage.geometry.coordinates[0].map(c => [c[1], c[0]])
+            : parsedMessage.geometry.coordinates[0][0].map(c => [c[1], c[0]]);
+
+        // Border-only: keep fill enabled (so the polygon's interior remains a click
+        // target for hit-testing) but fillOpacity:0 so it doesn't obscure the basemap
+        // or any markers underneath.
+        return L.polygon(coordinates, {
             fillColor: parsedMessage.color,
             color: parsedMessage.color,
             weight: 2,
             opacity: 0.8,
-            fillOpacity: 0.3,
+            fillOpacity: 0,
             className: 'marker-fade'
         });
-        polygon.bindPopup(this.createPopupContent(parsedMessage));
-        return polygon;
     }
 
     createLineMarker(parsedMessage) {
-        let coordinates;
-        if (parsedMessage.geometry.type === 'LineString') {
-            coordinates = parsedMessage.geometry.coordinates.map(c => [c[1], c[0]]);
-        } else {
-            coordinates = parsedMessage.geometry.coordinates[0].map(c => [c[1], c[0]]);
-        }
-        const polyline = L.polyline(coordinates, {
+        const coordinates = parsedMessage.geometry.type === 'LineString'
+            ? parsedMessage.geometry.coordinates.map(c => [c[1], c[0]])
+            : parsedMessage.geometry.coordinates[0].map(c => [c[1], c[0]]);
+        return L.polyline(coordinates, {
             color: parsedMessage.color,
             weight: 3,
             opacity: 0.8,
             className: 'marker-fade'
         });
-        polyline.bindPopup(this.createPopupContent(parsedMessage));
-        return polyline;
-    }
-
-    createPopupContent(parsedMessage) {
-        let html = '<div style="min-width: 220px;">';
-        html += `<div class="popup-field"><div class="popup-label">Topic</div><div class="popup-value" style="font-size: 0.75rem; word-break: break-all;">${escapeHtml(parsedMessage.topic)}</div></div>`;
-        html += `<div class="popup-field"><div class="popup-label">Category</div><div class="popup-value">${escapeHtml(parsedMessage.category)}</div></div>`;
-        if (parsedMessage.pubtime) {
-            html += `<div class="popup-field"><div class="popup-label">Published</div><div class="popup-value">${escapeHtml(new Date(parsedMessage.pubtime).toLocaleString())}</div></div>`;
-        }
-        if (parsedMessage.geometry && parsedMessage.geometry.type === 'Point') {
-            const [lon, lat] = parsedMessage.geometry.coordinates;
-            html += `<div class="popup-field"><div class="popup-label">Coordinates</div><div class="popup-value">${lat.toFixed(4)}, ${lon.toFixed(4)}</div></div>`;
-        }
-        html += `<button class="popup-details-btn" data-msg-id="${escapeHtml(parsedMessage.id)}">View details &amp; GDC links</button>`;
-        html += '</div>';
-        return html;
     }
 
     /**
      * Animate a marker from its full color to a grey "ghost" style over
      * fadeDuration. The marker is NOT removed when the fade completes —
      * it stays buffered until FIFO eviction.
+     *
+     * Polygons start with fillOpacity:0 (border-only) — we preserve that by
+     * interpolating from each marker's initial fillOpacity, so border-only
+     * shapes stay border-only throughout fade and ghost.
      */
     startFade(id, marker) {
         const startTime = Date.now();
         const duration = this.fadeDuration;
-        const ghostFill = '#9ca3af';
-        const ghostStroke = '#6b7280';
+        const initialFillOpacity = marker.options.fillOpacity ?? 0;
+        const ghostFillOpacity = initialFillOpacity > 0 ? 0.35 : 0;
 
         const animate = () => {
             const entry = this.markers.get(id);
@@ -162,18 +142,18 @@ class MapViewer {
             try {
                 if (progress >= 1) {
                     marker.setStyle({
-                        fillColor: ghostFill,
-                        color: ghostStroke,
+                        fillColor: '#9ca3af',
+                        color: '#6b7280',
                         weight: 1,
                         opacity: 0.55,
-                        fillOpacity: 0.35
+                        fillOpacity: ghostFillOpacity
                     });
                     entry.fadeRaf = null;
                     return;
                 }
                 marker.setStyle({
                     opacity: 1 - 0.45 * progress,
-                    fillOpacity: 0.8 - 0.45 * progress
+                    fillOpacity: initialFillOpacity - (initialFillOpacity - ghostFillOpacity) * progress
                 });
             } catch (e) {
                 return;
@@ -195,5 +175,66 @@ class MapViewer {
 
     getMarkerCount() {
         return this.markers.size;
+    }
+
+    /**
+     * Hit-test all current markers against a click latlng. Returns an array
+     * of message ids whose shape contains (or comes within `tolerancePx` of)
+     * the click. Used to drive the multi-hit picker.
+     */
+    findMessageIdsAt(latlng, tolerancePx = 4) {
+        if (!this.map || this.markers.size === 0) return [];
+        const clickPt = this.map.latLngToContainerPoint(latlng);
+        const hits = [];
+        for (const [id, entry] of this.markers) {
+            if (this._hitTest(entry.marker, latlng, clickPt, tolerancePx)) hits.push(id);
+        }
+        return hits;
+    }
+
+    _hitTest(layer, latlng, clickPt, tolerancePx) {
+        if (layer instanceof L.CircleMarker) {
+            const c = this.map.latLngToContainerPoint(layer.getLatLng());
+            return clickPt.distanceTo(c) <= layer.getRadius() + tolerancePx;
+        }
+        if (layer instanceof L.Polygon) {
+            if (!layer.getBounds().contains(latlng)) return false;
+            return MapViewer._pointInPolygon(latlng, layer);
+        }
+        if (layer instanceof L.Polyline) {
+            const points = layer.getLatLngs().map(ll => this.map.latLngToContainerPoint(ll));
+            for (let i = 0; i < points.length - 1; i++) {
+                if (MapViewer._distToSegment(clickPt, points[i], points[i + 1]) <= tolerancePx) return true;
+            }
+            return false;
+        }
+        return false;
+    }
+
+    /** Ray-casting point-in-polygon over the outer ring (lat/lng space). */
+    static _pointInPolygon(latlng, polygon) {
+        const rings = polygon.getLatLngs();
+        if (!rings.length) return false;
+        // L.Polygon.getLatLngs() returns either [ring] (simple) or [outer, hole, ...]
+        // — either way rings[0] is the outer ring as an array of LatLng.
+        const outer = Array.isArray(rings[0]) ? rings[0] : rings;
+        let inside = false;
+        for (let i = 0, j = outer.length - 1; i < outer.length; j = i++) {
+            const xi = outer[i].lng, yi = outer[i].lat;
+            const xj = outer[j].lng, yj = outer[j].lat;
+            const intersect = ((yi > latlng.lat) !== (yj > latlng.lat))
+                && (latlng.lng < ((xj - xi) * (latlng.lat - yi)) / (yj - yi) + xi);
+            if (intersect) inside = !inside;
+        }
+        return inside;
+    }
+
+    static _distToSegment(p, a, b) {
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const len2 = dx * dx + dy * dy;
+        if (len2 === 0) return Math.hypot(p.x - a.x, p.y - a.y);
+        let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
+        t = Math.max(0, Math.min(1, t));
+        return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
     }
 }

@@ -7,8 +7,8 @@ class MQTTClient {
         this.client = null;
         this.connected = false;
         this.connecting = false;
-        this.messageHandlers = [];
-        this.statusHandlers = [];
+        this.onMessage = null;       // assign: (topic, payload) => void
+        this.onStatusChange = null;  // assign: (status, message) => void
         this.currentBroker = null;
         this.currentProtocol = null;
         this.subscribedTopics = [];
@@ -150,49 +150,21 @@ class MQTTClient {
      * @param {Buffer} payload - Message payload
      */
     handleMessage(topic, payload) {
+        if (!this.onMessage) return;
         try {
-            const message = payload.toString();
-            this.messageHandlers.forEach(handler => {
-                try {
-                    handler(topic, message);
-                } catch (error) {
-                    console.error('Error in message handler:', error);
-                }
-            });
+            this.onMessage(topic, payload.toString());
         } catch (error) {
-            console.error('Error handling message:', error);
+            console.error('Error in MQTT message handler:', error);
         }
     }
 
-    /**
-     * Register a message handler
-     * @param {function} callback - Callback function(topic, message)
-     */
-    onMessage(callback) {
-        this.messageHandlers.push(callback);
-    }
-
-    /**
-     * Register a status change handler
-     * @param {function} callback - Callback function(status, message)
-     */
-    onStatusChange(callback) {
-        this.statusHandlers.push(callback);
-    }
-
-    /**
-     * Emit status change
-     * @param {string} status - Status (connected, connecting, disconnected, error)
-     * @param {string} message - Status message
-     */
     emitStatus(status, message) {
-        this.statusHandlers.forEach(handler => {
-            try {
-                handler(status, message);
-            } catch (error) {
-                console.error('Error in status handler:', error);
-            }
-        });
+        if (!this.onStatusChange) return;
+        try {
+            this.onStatusChange(status, message);
+        } catch (error) {
+            console.error('Error in MQTT status handler:', error);
+        }
     }
 
     /**

@@ -47,15 +47,15 @@
                 <!-- Summary Stats -->
                 <div class="summary-card">
                     <div class="flex justify-between mb-2">
-                        <span>Total Messages:</span>
+                        <span>Total received:</span>
                         <span id="total-messages" class="font-bold">0</span>
                     </div>
                     <div class="flex justify-between mb-2">
-                        <span>Messages/sec:</span>
+                        <span>Per second:</span>
                         <span id="messages-per-second" class="font-bold">0.0</span>
                     </div>
                     <div class="flex justify-between">
-                        <span>Visible Markers:</span>
+                        <span>Buffered:</span>
                         <span id="visible-markers" class="font-bold">0</span>
                     </div>
                 </div>
@@ -78,15 +78,15 @@
             <!-- Map Controls Overlay -->
             <div class="map-info-overlay">
                 <div id="map-info">
-                    <div>Messages: <span id="map-message-count">0</span></div>
-                    <div>Shown: <span id="map-shown-count">0</span></div>
+                    <div>Total: <span id="map-message-count">0</span></div>
+                    <div>On map: <span id="map-shown-count">0</span></div>
                 </div>
             </div>
         </main>
     </div>
 
     <!-- About Modal -->
-    <div id="about-modal" class="modal hidden items-center justify-center">
+    <div id="about-modal" class="modal">
         <div class="modal-card max-w-xl">
             <div class="flex justify-between items-center mb-4">
                 <h2 class="text-xl font-bold modal-heading">About WIS2 Live Mapper</h2>
@@ -125,7 +125,7 @@
     </div>
 
     <!-- Payload Detail Modal -->
-    <div id="payload-modal" class="modal hidden items-center justify-center">
+    <div id="payload-modal" class="modal">
         <div class="modal-card max-w-3xl max-h-[85vh] flex flex-col">
             <div class="flex justify-between items-start mb-2 gap-3">
                 <div class="flex-1 min-w-0">
@@ -147,7 +147,7 @@
     </div>
 
     <!-- Message List Modal (used for "browse topic" and "no-geo only") -->
-    <div id="message-list-modal" class="modal hidden items-center justify-center">
+    <div id="message-list-modal" class="modal">
         <div class="modal-card max-w-2xl max-h-[80vh] flex flex-col">
             <div class="flex justify-between items-center mb-2">
                 <h2 id="message-list-heading" class="text-xl font-bold modal-heading">Messages</h2>
@@ -164,7 +164,7 @@
     </div>
 
     <!-- Configuration Modal -->
-    <div id="config-modal" class="modal hidden items-center justify-center">
+    <div id="config-modal" class="modal">
         <div class="modal-card max-w-md">
             <div class="flex justify-between items-center mb-4">
                 <h2 class="text-xl font-bold modal-heading">Configuration</h2>
@@ -229,7 +229,7 @@
         </div>
     </div>
 
-    <!-- Tailwind CSS (utilities only — colors handled in styles.css) -->
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
 
     <!-- Leaflet JS -->
