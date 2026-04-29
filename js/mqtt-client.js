@@ -199,15 +199,31 @@ class MQTTClient {
      * Disconnect from broker
      */
     disconnect() {
-        if (this.client) {
-            this.client.end(false, {}, () => {
-                console.log('Disconnected from broker');
-                this.connected = false;
-                this.connecting = false;
-                this.emitStatus('disconnected', 'Disconnected');
-            });
-            this.client = null;
+        const client = this.client;
+        // Reset state SYNCHRONOUSLY so a subsequent connect() isn't blocked by
+        // the connect()-guard while MQTT.js's async teardown is still running.
+        this.client = null;
+        this.connected = false;
+        this.connecting = false;
+        this.subscribedTopics = [];
+
+        if (client) {
+            try {
+                // CRITICAL: detach listeners before end(). The handlers close over
+                // `this` and read `this.connected`/`this.connecting`/`this.client`
+                // at fire time — without this, the old client's async 'close' /
+                // 'error' / 'offline' events would clobber a NEW connection that's
+                // already been started by the time they fire.
+                if (typeof client.removeAllListeners === 'function') {
+                    client.removeAllListeners();
+                }
+                // force=true means don't wait for an unsubscribe/disconnect ack
+                client.end(true, {}, () => console.log('Disconnected from broker'));
+            } catch (e) {
+                console.warn('Error during MQTT teardown:', e);
+            }
         }
+        this.emitStatus('disconnected', 'Disconnected');
     }
 
     /**

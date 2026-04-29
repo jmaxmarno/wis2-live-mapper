@@ -284,6 +284,31 @@ class WIS2LiveMapper {
         document.getElementById('broker-select').addEventListener('change', (e) => {
             this.updateProtocolOptions(e.target.value);
         });
+
+        // Dirty tracking: any change to a config control marks the form as dirty
+        // and prompts the user to click Connect. Cleared after a successful connect().
+        const configForm = document.getElementById('config-form');
+        if (configForm) {
+            configForm.addEventListener('change', () => this.markConfigDirty(true));
+            configForm.addEventListener('input', (e) => {
+                if (e.target && (e.target.id === 'max-messages' || e.target.id === 'fade-duration')) {
+                    this.markConfigDirty(true);
+                }
+            });
+        }
+    }
+
+    /**
+     * Show / hide the "settings changed — click Connect" indicator and pulse the
+     * Connect button. Called with `true` whenever a config control is touched
+     * and `false` after a connect() kickoff.
+     */
+    markConfigDirty(dirty) {
+        this.configDirty = !!dirty;
+        const note = document.getElementById('config-dirty-note');
+        const connectBtn = document.getElementById('connect-btn');
+        if (note) note.classList.toggle('hidden', !dirty);
+        if (connectBtn) connectBtn.classList.toggle('btn-attention', !!dirty);
     }
 
     /**
@@ -510,7 +535,7 @@ class WIS2LiveMapper {
 
         this.configManager.config.settings.maxMessages = maxMessages;
         this.configManager.config.settings.markerFadeDuration = fadeDuration;
-        this.mapViewer.maxMessages = maxMessages;
+        if (this.recentMessages) this.recentMessages.setMaxSize(maxMessages);
         this.mapViewer.fadeDuration = fadeDuration * 1000;
 
         // Save preferences
@@ -523,10 +548,19 @@ class WIS2LiveMapper {
             }
         });
 
-        // Connect
+        // If we're already connected/connecting, drop the existing session so
+        // the reconnect picks up the new broker / protocol / topic / setting selection.
+        if (this.mqttClient.isConnected() || this.mqttClient.connecting) {
+            this.mqttClient.disconnect();
+        }
+
+        // Connect with the (possibly updated) selection.
         this.currentBroker = broker;
         this.currentProtocol = protocol;
         this.mqttClient.connect(broker, protocol, topics);
+
+        // Form is now in sync with the live connection.
+        this.markConfigDirty(false);
 
         // Hide modal
         this.hideConfigModal();
